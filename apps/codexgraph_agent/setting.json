@@ -1,0 +1,28 @@
+{
+    "setting": {
+        "prompt_path": "apps/codexgraph_agent/prompt",
+        "repo_path": "C:\\Users\\LENOVO\\Desktop\\CodeXGraph\\ms-agent",
+        "llm_model_name": "deepseek-coder",
+        "llm_temperature": 1.0,
+        "max_iterations": 5,
+        "project_list": [
+            "code_chat",
+            "code_comment",
+            "code_debug",
+            "code_generate",
+            "code_unittest"
+        ],
+        "project_id": "code_chat",
+        "env_path_dict": {
+            "env_path": "F:\\python\\Anaconda\\envs\\index_build\\python.exe",
+            "working_directory": "C:\\Users\\LENOVO\\Desktop\\CodeXGraph\\ms-agent\\modelscope_agent\\environment\\graph_database\\indexer"
+        },
+        "neo4j": {
+            "url": "bolt://localhost:7687",
+            "user": "neo4j",
+            "password": "GuoGuo0532",
+            "database_name": "neo4j"
+        },
+        "language": "Python"
+    }
+}
