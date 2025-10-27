@@ -54,6 +54,8 @@ class CodexGraphAgentGeneral(Agent, ABC):
 
         self.action_type = 'ACTIONS'
         self.generate_message = 'You are ready to do generate New Code.'
+        # 保存语言以便子类规则处理（例如 C 需要使用 STRUCT 而非 CLASS）
+        self.language = language
 
         self.set_action_type_and_message()
 

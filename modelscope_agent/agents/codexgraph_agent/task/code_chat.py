@@ -63,6 +63,14 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
         pass
 
     def question_to_cypher(self, question: str) -> str:
+        # 根据 agent 的 language 调整标签映射（C 使用 STRUCT/FILE，而 Python 使用 CLASS/MODULE）
+        lang = getattr(self, 'language', 'python')
+        is_c = str(lang).lower() == 'c'
+        class_label = 'STRUCT' if is_c else 'CLASS'
+        module_label = 'FILE' if is_c else 'MODULE'
+        method_label = 'FUNCTION' if is_c else 'METHOD'
+        field_label = 'STRUCT_MEMBER' if is_c else 'FIELD'
+
         # 查找某个文件下的所有节点
         match = re.search(r'find nodes in file ([\w\.\-]+)', question, re.IGNORECASE)
         if match:
@@ -80,7 +88,7 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
         match = re.search(r'find module contains ([\w_\-]+)', question, re.IGNORECASE)
         if match:
             keyword = match.group(1).strip()
-            return f"MATCH (m:MODULE) WHERE m.name CONTAINS '{keyword}' RETURN m.name, m.file_path"
+            return f"MATCH (m:{module_label}) WHERE m.name CONTAINS '{keyword}' RETURN m.name, m.file_path"
         # 查找GLOBAL_VARIABLE名称中包含关键词
         match = re.search(r'find global_variable contains ([\w_\-]+)', question, re.IGNORECASE)
         if match:
@@ -90,17 +98,17 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
         match = re.search(r'find class contains ([\w_\-]+)', question, re.IGNORECASE)
         if match:
             keyword = match.group(1).strip()
-            return f"MATCH (c:CLASS) WHERE c.name CONTAINS '{keyword}' RETURN c.name, c.file_path, c.signature, c.code"
+            return f"MATCH (c:{class_label}) WHERE c.name CONTAINS '{keyword}' RETURN c.name, c.file_path, c.signature, c.code"
         # 查找METHOD名称中包含关键词
         match = re.search(r'find method contains ([\w_\-]+)', question, re.IGNORECASE)
         if match:
             keyword = match.group(1).strip()
-            return f"MATCH (m:METHOD) WHERE m.name CONTAINS '{keyword}' RETURN m.name, m.file_path, m.class, m.signature, m.code"
+            return f"MATCH (m:{method_label}) WHERE m.name CONTAINS '{keyword}' RETURN m.name, m.file_path, m.class, m.signature, m.code"
         # 查找FIELD名称中包含关键词
         match = re.search(r'find field contains ([\w_\-]+)', question, re.IGNORECASE)
         if match:
             keyword = match.group(1).strip()
-            return f"MATCH (f:FIELD) WHERE f.name CONTAINS '{keyword}' RETURN f.name, f.file_path, f.class"
+            return f"MATCH (f:{field_label}) WHERE f.name CONTAINS '{keyword}' RETURN f.name, f.file_path, f.class"
         # 查找FUNCTION名称中包含关键词
         match = re.search(r'find function contains ([\w_\-]+)', question, re.IGNORECASE)
         if match:

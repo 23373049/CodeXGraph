@@ -39,7 +39,7 @@ Create a separate `Python<=3.9` environment and install the required dependencie
 ```bash
 conda create --name index_build python=3.9
 
-conda activate myenv
+conda activate index_build
 
 pip install -r build_requirements.txt
 ```
