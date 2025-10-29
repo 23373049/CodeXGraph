@@ -297,7 +297,8 @@ class AstVisitorClient:
             # Ensure the symbol node has file_path/name/type properties when created
             # add_node will merge properties if node already exists
             node_parms = {
-                'name': self.symbol_data[full_name].get('name', name_short),
+                # Ensure a short display name is available; fall back to last segment of full_name
+                'name': self.symbol_data[full_name].get('name', full_name.split('.')[-1]),
                 'file_path': self.symbol_data[full_name].get('path', ''),
                 'full_name': full_name,
                 'type': kind,

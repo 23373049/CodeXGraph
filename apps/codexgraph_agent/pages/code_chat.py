@@ -1,6 +1,18 @@
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
+
+# Ensure the repo root is on sys.path so imports like `apps.codexgraph_agent...`
+# work regardless of the current working directory when running Streamlit.
+try:
+    repo_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+except Exception:
+    # Best-effort only; if this fails, normal import errors will surface.
+    pass
 
 import json
 import streamlit as st
