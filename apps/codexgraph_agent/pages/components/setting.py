@@ -56,9 +56,9 @@ def setting_repo(page_name):
         col1, col2, col3, col4, col5 = st.columns([1, 3, 1, 1, 1])
 
         with col1:
-            # Language selectbox
+            # Language selectbox (支持 Python 和 C)
             st.session_state.shared['setting']['language'] = st.selectbox(
-                'Language', ['Python'])
+                'Language', ['Python', 'C'])
 
         with col2:
             repo_path = st.text_input(

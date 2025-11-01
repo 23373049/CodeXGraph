@@ -367,7 +367,8 @@ class PageBase(ABC):
                     is_clear=True,
                     max_workers=None,
                     env_path_dict=env_path_dict,
-                    update_progress_bar=self.create_update_progress_bar()
+                    update_progress_bar=self.create_update_progress_bar(),
+                    language=st.session_state.shared['setting'].get('language', 'Python')
                 )
             except Exception as e:
                 page_state['build_place'].error(

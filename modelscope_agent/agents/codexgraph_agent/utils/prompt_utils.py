@@ -15,9 +15,21 @@ def response_to_msg(thought, action, action_input):
 
 
 def build_system_prompt(folder_path, schema_path, language='python'):
-    primary_system_prompt_path = os.path.join(folder_path, language,
+    # If the requested language folder doesn't exist, fall back to 'python'
+    language_folder = language
+    candidate_path = os.path.join(folder_path, language_folder)
+    if not os.path.isdir(candidate_path):
+        # try lowercase variant
+        candidate_path = os.path.join(folder_path, language.lower())
+        if os.path.isdir(candidate_path):
+            language_folder = language.lower()
+        else:
+            # final fallback to python
+            language_folder = 'python'
+
+    primary_system_prompt_path = os.path.join(folder_path, language_folder,
                                               'system_prompt_primary.txt')
-    cypher_system_prompt_path = os.path.join(folder_path, language,
+    cypher_system_prompt_path = os.path.join(folder_path, language_folder,
                                              'system_prompt_cypher.txt')
 
     with open(primary_system_prompt_path, 'r') as f:
@@ -25,7 +37,8 @@ def build_system_prompt(folder_path, schema_path, language='python'):
     with open(cypher_system_prompt_path, 'r') as f:
         cypher_system_prompt = f.read()
 
-    if language == 'python':
+    # Only replace python-specific schema placeholder when using python prompts
+    if language_folder == 'python':
         db_schema_path = os.path.join(schema_path, 'python', 'schema.txt')
         with open(db_schema_path, 'r') as f:
             db_schema = f.read()
@@ -38,7 +51,15 @@ def build_system_prompt(folder_path, schema_path, language='python'):
 
 
 def load_prompt_template(file_path, prompt_file, language='python'):
-    prompt_file_path = os.path.join(file_path, language, prompt_file)
+    # fall back to python folder if requested language folder does not exist
+    prompt_lang_folder = language
+    if not os.path.isdir(os.path.join(file_path, prompt_lang_folder)):
+        if os.path.isdir(os.path.join(file_path, language.lower())):
+            prompt_lang_folder = language.lower()
+        else:
+            prompt_lang_folder = 'python'
+
+    prompt_file_path = os.path.join(file_path, prompt_lang_folder, prompt_file)
     with open(prompt_file_path, 'r') as f:
         user_prompt = f.read()
     return Template(user_prompt)
