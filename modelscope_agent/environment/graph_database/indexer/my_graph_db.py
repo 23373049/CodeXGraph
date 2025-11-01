@@ -282,6 +282,40 @@ class GraphDatabaseHandler:
                     self.update_node(
                         full_name=full_name, parms={'file_path': file_path})
 
+    def get_node_relations(self, full_name):
+        """获取某节点所有相关关系（出边+入边），返回结构化信息"""
+        relations = {
+            'incoming_calls': [],  # 谁调用了我
+            'outgoing_calls': [],  # 我调用了谁
+            'inherits_from': [],   # 我继承谁
+            'inherited_by': [],    # 谁继承我
+        }
+        # 谁调用我（入CALL边）
+        cypher = (
+            "MATCH (src)-[r:CALL]->(dst {full_name: $full_name}) RETURN src.full_name AS caller"
+        )
+        rs = self.execute_query(cypher, full_name=full_name)
+        relations['incoming_calls'] = [r['caller'] for r in rs if r.get('caller')]
+        # 我调用了谁（出CALL边）
+        cypher = (
+            "MATCH (src {full_name: $full_name})-[r:CALL]->(dst) RETURN dst.full_name AS callee"
+        )
+        rs = self.execute_query(cypher, full_name=full_name)
+        relations['outgoing_calls'] = [r['callee'] for r in rs if r.get('callee')]
+        # 我继承谁（出INHERITS边）
+        cypher = (
+            "MATCH (src {full_name: $full_name})-[r:INHERITS]->(dst) RETURN dst.full_name AS base"
+        )
+        rs = self.execute_query(cypher, full_name=full_name)
+        relations['inherits_from'] = [r['base'] for r in rs if r.get('base')]
+        # 谁继承我（入INHERITS边）
+        cypher = (
+            "MATCH (src)-[r:INHERITS]->(dst {full_name: $full_name}) RETURN src.full_name AS subclass"
+        )
+        rs = self.execute_query(cypher, full_name=full_name)
+        relations['inherited_by'] = [r['subclass'] for r in rs if r.get('subclass')]
+        return relations
+
 
 class GraphDatabaseHandlerNone:
 

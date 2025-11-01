@@ -2,6 +2,7 @@ import codecs
 
 import sourcetraildb as srctrl
 from my_graph_db import GraphDatabaseHandler
+from method_description_generator import get_description_generator
 
 
 class SymbolRegistry:
@@ -243,6 +244,9 @@ class AstVisitorClient:
             if 'code' in self.symbol_data[full_name].keys():
                 data['code'] = self.symbol_data[full_name]['code']
 
+            # 保存原始类型
+            original_kind = kind
+            
             if kind in ['FUNCTION', 'METHOD', 'GLOBAL_VARIABLE', 'FIELD']:
                 parent_class = self.get_parent_class(full_name)
                 if parent_class:
@@ -254,6 +258,17 @@ class AstVisitorClient:
                     if kind == 'FUNCTION':
                         kind = 'METHOD'
                         self.symbol_data[full_name]['kind'] = kind
+            
+            # 为METHOD以及FUNCTION节点生成描述
+            if original_kind in ['FUNCTION', 'METHOD'] or kind in ['FUNCTION', 'METHOD']:
+                print(f"开始为 {original_kind}->{kind} {full_name} 生成描述...")
+                description = self._generate_method_description(full_name, data)
+                if description:
+                    data['description'] = description
+                    print(f"为 {kind} {full_name} 生成描述: {description[:50]}...")
+                else:
+                    print(f"为 {kind} {full_name} 生成描述失败")
+            
             # 创建节点 ------------------------------------------------------------------
             self.graphDB.add_node(label=kind, full_name=full_name, parms=data)
             # 边的关系 ------------------------------------------------------------------
@@ -314,11 +329,21 @@ class AstVisitorClient:
         name = self.symbolId_to_Name[symbolId]
         kind = self.symbol_data[name]['kind']
 
+        print(f"recordSymbolScopeLocation: {kind} {name}")
+
         if kind in ['CLASS', 'FUNCTION', 'METHOD']:
             code = self.extract_code_between_lines(
                 sourceRange.startLine, sourceRange.endLine, is_indent=True)
+            print(f"提取的代码长度: {len(code)} 字符")
+            print(f"代码内容: {code[:100]}...")
+            
             self.graphDB.add_node(kind, full_name=name, parms={'code': code})
             self.extract_signature(code)
+            
+            # 如果是METHOD或FUNCTION节点，更新描述
+            if kind in ['METHOD', 'FUNCTION']:
+                print(f"为 {kind} 节点 {name} 生成描述...")
+                self._update_method_description(name, code)
 
     def recordSymbolSignatureLocation(self, symbolId, sourceRange):
         pass
@@ -389,10 +414,6 @@ class AstVisitorClient:
         pass
 
     def recordFile(self, filePath):
-        self.indexedFileId = 1
-        self.indexedFileId_to_path[self.indexedFileId] = filePath.replace(
-            '\\', '/')
-        self.this_file_path = self.indexedFileId_to_path[self.indexedFileId]
         return 1
 
     def recordFileLanguage(self, fileId, languageIdentifier):
@@ -409,6 +430,86 @@ class AstVisitorClient:
 
     def recordError(self, message, fatal, sourceRange):
         pass
+    
+    def _generate_method_description(self, full_name: str, data: dict) -> str:
+        """
+        为METHOD节点生成描述
+        
+        Args:
+            full_name: 方法的完整名称
+            data: 方法的数据字典
+            
+        Returns:
+            方法的描述文本
+        """
+        try:
+            # 获取方法代码
+            method_code = data.get('code', '')
+            if not method_code:
+                print(f"警告: {full_name} 没有代码内容")
+                return ""
+            # 获取方法名称和类名
+            method_name = data.get('name', full_name.split('.')[-1])
+            class_name = data.get('class', '')
+            file_path = data.get('file_path', '')
+            # 新增：获取方法节点所有邻接关系
+            relations = self.graphDB.get_node_relations(full_name)
+            print(f"正在为 {full_name} 生成描述...")
+            print(f"  方法名: {method_name}")
+            print(f"  类名: {class_name}")
+            print(f"  文件路径: {file_path}")
+            print(f"  代码长度: {len(method_code)} 字符")
+            print(f"  关系信息: {relations}")
+            # 使用描述生成器生成描述
+            description_generator = get_description_generator()
+            description = description_generator.generate_method_description(
+                method_code=method_code,
+                method_name=method_name,
+                class_name=class_name,
+                file_path=file_path,
+                relations=relations
+            )
+            print(f"生成描述: {description}")
+            return description
+            
+        except Exception as e:
+            print(f"生成方法描述失败 {full_name}: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"描述生成失败: {str(e)}"
+    
+    def _update_method_description(self, full_name: str, method_code: str):
+        """
+        更新METHOD节点的描述
+        
+        Args:
+            full_name: 方法的完整名称
+            method_code: 方法的完整代码
+        """
+        try:
+            # 获取方法信息
+            method_name = full_name.split('.')[-1]
+            class_name = self.get_parent_class(full_name)
+            file_path = self.symbol_data[full_name].get('path', '')
+            
+            # 生成描述
+            description_generator = get_description_generator()
+            description = description_generator.generate_method_description(
+                method_code=method_code,
+                method_name=method_name,
+                class_name=class_name,
+                file_path=file_path
+            )
+            
+            if description:
+                # 更新图数据库中的节点
+                self.graphDB.update_node(
+                    full_name=full_name, 
+                    parms={'description': description}
+                )
+                
+        except Exception as e:
+            print(f"更新方法描述失败 {full_name}: {e}")
 
 
 def symbolDefinitionKindToString(symbolDefinitionKind):

@@ -160,11 +160,35 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
     def find_nodes_in_file(self, keyword):
         return f"MATCH (n) WHERE n.file_path CONTAINS '{keyword}' RETURN labels(n) AS node_type, n.name, n.file_path, n"
 
+    def _label_map(self):
+        """返回当前 agent 语言对应的标签映射。"""
+        lang = (getattr(self, 'language', '') or '').lower()
+        if lang.startswith('c'):
+            return {
+                'class_label': 'STRUCT',
+                'module_label': 'FILE',
+                'method_label': 'FUNCTION',
+                'field_label': 'STRUCT_MEMBER',
+                'function_label': 'FUNCTION'
+            }
+        # 默认 python 风格
+        return {
+            'class_label': 'CLASS',
+            'module_label': 'MODULE',
+            'method_label': 'FUNCTION',
+            'field_label': 'FIELD',
+            'function_label': 'FUNCTION'
+        }
+
     def find_class_by_keyword(self, keyword):
-        return f"MATCH (c:CLASS) WHERE c.name CONTAINS '{keyword}' RETURN c.name, c.file_path, c.signature, c.code"
+        labels = self._label_map()
+        class_label = labels.get('class_label', 'CLASS')
+        return f"MATCH (c:{class_label}) WHERE c.name CONTAINS '{keyword}' RETURN c.name, c.file_path, c.signature, c.code"
 
     def find_function_by_keyword(self, keyword):
-        return f"MATCH (f:FUNCTION) WHERE f.name CONTAINS '{keyword}' RETURN f.name, f.file_path, f.signature, f.code"
+        labels = self._label_map()
+        method_label = labels.get('method_label', 'FUNCTION')
+        return f"MATCH (f:{method_label}) WHERE f.name CONTAINS '{keyword}' RETURN f.name, f.file_path, f.signature, f.code"
 
     def introduce_entity(self, keyword):
         return f"MATCH (n) WHERE n.name CONTAINS '{keyword}' RETURN labels(n) AS node_type, n.name, n.file_path, n"
@@ -180,14 +204,16 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
     def find_call_hierarchy(self, keyword):
         """查找调用层级：返回与目标实体相关的上游调用者（callers）和下游被调用者（callees）。
         默认只展开 1..2 层 CALLS 关系以避免结果爆炸。"""
-        # 注意：如果图中关系名不是 CALLS，请根据实际模型调整
+        # 尝试同时匹配 CALLS 和 USES 两种常见的调用/依赖关系，兼容不同图模型
+        # 注意：某些 Cypher 引擎对 [:TYPE1|TYPE2*min..max] 的语法支持可能不同，
+        # 若执行报错，可改为分别查询或使用 WHERE type(r) IN [...] 形式。
         return (
             f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
-            "OPTIONAL MATCH (caller)-[r1:CALLS*1..2]->(t) "
-            "OPTIONAL MATCH (t)-[r2:CALLS*1..2]->(callee) "
+            "OPTIONAL MATCH (caller)-[r1:CALLS|USES*1..2]->(t) "
+            "OPTIONAL MATCH (t)-[r2:CALLS|USES*1..2]->(callee) "
             "RETURN DISTINCT labels(t) AS target_labels, t.name AS target_name, t.file_path AS target_file, "
-            "collect(DISTINCT {from_labels: labels(caller), from_name: caller.name, rel: 'CALLS'}) AS callers, "
-            "collect(DISTINCT {to_labels: labels(callee), to_name: callee.name, rel: 'CALLS'}) AS callees"
+            "collect(DISTINCT {from_labels: labels(caller), from_name: caller.name, rel: type(r1)}) AS callers, "
+            "collect(DISTINCT {to_labels: labels(callee), to_name: callee.name, rel: type(r2)}) AS callees"
         )
     # 3. LLM调用时传入所有function schema
     def function_call_llm(self, user_query: str):
@@ -227,6 +253,41 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
         if func:
             return func(**arguments)
         return ""
+
+    def question_to_cypher(self, question: str) -> str:
+        """
+        将自然语言的问题转换为一个基础的 Cypher 查询，
+        根据当前 agent 的语言（self.language）调整图谱中使用的标签名称。
+
+        目标：把针对 Python 的查询适配为针对 C 语言的查询（例如将 CLASS -> STRUCT, MODULE -> FILE 等）。
+
+        返回一个简单的匹配节点的 Cypher 字符串，优先匹配 name 字段包含关键字的节点，并返回常用字段。
+        """
+        kw = question.strip().strip('\"\'')
+        lang = (getattr(self, 'language', '') or '').lower()
+
+        # 默认 Python 风格标签
+        class_label = 'CLASS'
+        module_label = 'MODULE'
+        method_label = 'FUNCTION'
+        field_label = 'FIELD'
+
+        # 针对 C 语言的图谱映射（根据用户提供的建议）
+        if lang.startswith('c'):
+            class_label = 'STRUCT'
+            module_label = 'FILE'
+            # C 中没有方法/类方法，使用 FUNCTION 表示全局函数
+            method_label = 'FUNCTION'
+            # 结构体成员
+            field_label = 'STRUCT_MEMBER'
+
+        # 构造通用的匹配查询：匹配 name 中包含关键词的任意节点
+        # 同时返回节点标签、名称、文件路径、签名和代码（若存在）
+        cypher = (
+            f"MATCH (n) WHERE toLower(coalesce(n.name, '')) CONTAINS toLower('{kw}') "
+            "RETURN labels(n) AS node_type, n.name AS name, n.file_path AS file_path, n.signature AS signature, n.code AS code"
+        )
+        return cypher
 
 
     def _run(self, user_query: str, file_path: str = '', **kwargs) -> str:
