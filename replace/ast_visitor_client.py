@@ -490,6 +490,7 @@ class AstVisitorClient:
                     
                 referenced_full_name_temp = ref_info['referenced_full_name']
                 referenced_short_name = referenced_full_name_temp.split('.')[-1]
+                reference_kind_str = ref_info.get('referenceKind', 'USAGE')
                 
                 # 尝试从全局定义中解析
                 resolved_full_name = self.global_symbol_definitions.get(referenced_short_name)
@@ -525,15 +526,26 @@ class AstVisitorClient:
                         'edge_id': edge_id,
                         'new_end_name': resolved_full_name,
                         'new_end_label': resolved_kind,
-                        'old_end_name': referenced_full_name_temp
+                        'old_end_name': referenced_full_name_temp,
+                        'reference_kind': reference_kind_str,
+                        'context_full_name': full_name_of_context,
                     })
         
         # 第二步：批量更新边
+        edge_type_map = {
+            'CALL': 'CALL',
+            'USAGE': 'USES',
+            'USES': 'USES',
+            'INCLUDE': 'INCLUDE',
+        }
         for update_info in edges_to_update:
+            edge_type = edge_type_map.get(update_info.get('reference_kind', 'USAGE'), 'USES')
             self.graphDB.update_edge(
-                update_info['edge_id'],
-                new_end_name=update_info['new_end_name'],
-                new_end_label=update_info['new_end_label']
+                edge_id=update_info['edge_id'],
+                source_id=update_info['context_full_name'],
+                edge_type=edge_type,
+                target_id=update_info['old_end_name'],
+                new_target_id=update_info['new_end_name'],
             )
             symbols_to_delete.add(update_info['old_end_name'])
         

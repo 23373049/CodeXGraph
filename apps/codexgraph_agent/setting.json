@@ -14,13 +14,13 @@
         ],
         "project_id": "code_chat",
         "env_path_dict": {
-            "env_path": "F:\\python\\Anaconda\\envs\\mybuild\\python.exe",
-            "working_directory": "C:\\Users\\LENOVO\\Desktop\\CodeXGraph\\ms-agent\\modelscope_agent\\environment\\graph_database\\indexer"
+            "env_path": "D:\\Anaconda\\envs\\index_build\\python.exe",
+            "working_directory": "D:\\GitHub\\CodeXGraph\\modelscope_agent\\environment\\graph_database\\indexer"
         },
         "neo4j": {
             "url": "bolt://localhost:7687",
             "user": "neo4j",
-            "password": "GuoGuo0532",
+            "password": "neo4j1231",
             "database_name": "neo4j"
         },
         "language": "Python"
