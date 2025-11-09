@@ -5,6 +5,8 @@ import tree_sitter_c
 import os 
 
 from ast_visitor_client import AstVisitorClient
+from function_category import FunctionCategory
+from header_catalog import KNOWN_FUNCTIONS
 # 从 mock_dependencies 中导入 srctrl 以及转换函数
 from mock_dependencies import NameHierarchy, SourceRange, srctrl, symbolKindToString, referenceKindToString
 
@@ -91,93 +93,31 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
             if name_node:
                 func_name_short = name_node.text.decode('utf8', errors='ignore')
                 
-                # 处理函数参数和返回类型
-                declarator = node.child_by_field_name('declarator')
-                parameters = []
-                return_type = ''
-                
-                if declarator:
-                    param_list_node = None
-                    for child in declarator.children:
-                        if child.type == 'parameter_list':
-                            param_list_node = child
-                            break
-                    
-                    # 提取函数参数信息
-                    if param_list_node:
-                        for param_child in param_list_node.children:
-                            if param_child.type == 'parameter_declaration':
-                                param_type_node = param_child.child_by_field_name('type')
-                                param_declarator = param_child.child_by_field_name('declarator')
-                                
-                                param_name = ''
-                                param_type = ''
-                                
-                                # 提取参数类型
-                                if param_type_node:
-                                    param_type = param_type_node.text.decode('utf8', errors='ignore').strip()
-                                
-                                # 提取参数名称
-                                if param_declarator:
-                                    param_name_node = param_declarator
-                                    while param_name_node and param_name_node.type != 'identifier':
-                                        if param_name_node.child_by_field_name('declarator'):
-                                            param_name_node = param_name_node.child_by_field_name('declarator')
-                                        else:
-                                            break
-                                    
-                                    if param_name_node and param_name_node.type == 'identifier':
-                                        param_name = param_name_node.text.decode('utf8', errors='ignore')
-                                
-                                # 记录参数信息
-                                if param_name or param_type:
-                                    parameters.append({
-                                        'name': param_name,
-                                        'type': param_type
-                                    })
-                
-                # 提取返回类型
-                type_node = node.child_by_field_name('type')
-                if type_node:
-                    return_type = type_node.text.decode('utf8', errors='ignore').strip()
-                
-                # 构建函数签名
-                signature = f"{return_type} {func_name_short}("
-                if parameters:
-                    param_strs = []
-                    for param in parameters:
-                        if param['name'] and param['type']:
-                            param_strs.append(f"{param['type']} {param['name']}")
-                        elif param['type']:
-                            param_strs.append(param['type'])
-                        elif param['name']:
-                            param_strs.append(param['name'])
-                    signature += ", ".join(param_strs)
-                signature += ")"
-                
-                # 将函数属性信息传递给recordSymbolKind
-                function_attributes = {
-                    'parameters': parameters,
-                    'return_type': return_type,
-                    'signature': signature
-                }
+                # 直接记录整个函数定义（包含签名和函数体）到 code 属性
+                func_text = node.text.decode('utf8', errors='ignore')
                 
                 name_hierarchy = NameHierarchy(func_name_short, client.current_context_name())
-                symbol_id = client.recordSymbol(name_hierarchy, node_path=file_path, tree_node=node, 
-                                              kind_hint=symbolKindToString(srctrl.SymbolKind.FUNCTION))
-                # 传递函数属性信息给recordSymbolKind
-                client.recordSymbolKind(symbol_id, srctrl.SymbolKind.FUNCTION, function_attributes)
-                                
+                symbol_id = client.recordSymbol(
+                    name_hierarchy,
+                    node_path=file_path,
+                    tree_node=node,
+                    kind_hint=symbolKindToString(srctrl.SymbolKind.FUNCTION)
+                )
+                # 写入完整代码文本
+                full_name = client.symbolId_to_Name[symbol_id]
+                client.symbol_data[full_name]['code'] = func_text
                 
-                compound_statement = node.child_by_field_name('body')
-                if compound_statement:
-                    body_start_line = compound_statement.start_point[0] + 1
-                    body_end_line = compound_statement.end_point[0] + 1
-                    client.recordSymbolScopeLocation(symbol_id, SourceRange(body_start_line, body_end_line))
-                else:
-                    client.recordSymbolScopeLocation(symbol_id, source_range)
+                # 标记为用户自定义函数并创建图节点
+                client.recordSymbolKind(
+                    symbol_id,
+                    srctrl.SymbolKind.FUNCTION,
+                    {'category': FunctionCategory.USER_DEFINED.value}
+                )
+                
+                # 将作用域范围记录为整个函数（含签名），确保 code 包含签名
+                client.recordSymbolScopeLocation(symbol_id, source_range)
 
-                client.push_scope(client.symbolId_to_Name[symbol_id], symbol_id) 
+                client.push_scope(client.symbolId_to_Name[symbol_id], symbol_id)
                 print(f"  [SCOPE] ENTER FUNCTION: {client.symbolId_to_Name[symbol_id]}")
         
         # 2. 局部变量声明 (Local Variable Declaration) - 在函数体内
@@ -428,38 +368,54 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
             if function_id_node and function_id_node.type == 'identifier':
                 callee_name_short = function_id_node.text.decode('utf8', errors='ignore')
                 
+                # 尝试解析现有符号（可能生成一个文件限定的 UNKNOWN 占位）
                 referenced_full_name, referenced_symbol_id = client.resolve_referenced_symbol(callee_name_short)
 
-                # 特殊处理 printf
-                if callee_name_short == "printf":
-                    if referenced_full_name not in client.symbol_data or \
-                       client.symbol_data[referenced_full_name]['kind'] == symbolKindToString(srctrl.SymbolKind.UNKNOWN) or \
-                       client.symbol_data[referenced_full_name]['kind'] == symbolKindToString(srctrl.SymbolKind.FUNCTION_DECLARATION):
-                        
-                        if 'printf' not in client.global_symbol_definitions:
-                            printf_global_id = client.symbol.record_symbol('printf')
-                            client.symbolId_to_Name[printf_global_id] = 'printf'
-                            client.global_symbol_definitions['printf'] = 'printf'
-                            client.global_symbol_ids['printf'] = printf_global_id
-                            
-                            client.symbol_data['printf'] = {
-                                'name': 'printf',
-                                'path': 'builtins',
-                                'kind': symbolKindToString(srctrl.SymbolKind.FUNCTION),
-                                'parent_name': 'builtins',
-                                'full_name': 'printf',
-                                'references': []
+                # 如果是已知的库/系统函数，则确保创建为 FUNCTION，并补充属性
+                known_info = KNOWN_FUNCTIONS.get(callee_name_short)
+                if known_info:
+                    should_create_global = (
+                        referenced_full_name not in client.symbol_data or
+                        client.symbol_data[referenced_full_name]['kind'] in [
+                            symbolKindToString(srctrl.SymbolKind.UNKNOWN),
+                            symbolKindToString(srctrl.SymbolKind.FUNCTION_DECLARATION)
+                        ]
+                    )
+
+                    # 优先采用全局符号名（不带文件前缀）
+                    if callee_name_short not in client.global_symbol_definitions:
+                        global_id = client.symbol.record_symbol(callee_name_short)
+                        client.symbolId_to_Name[global_id] = callee_name_short
+                        client.global_symbol_definitions[callee_name_short] = callee_name_short
+                        client.global_symbol_ids[callee_name_short] = global_id
+
+                        client.symbol_data[callee_name_short] = {
+                            'name': callee_name_short,
+                            'path': 'system_library',
+                            'kind': symbolKindToString(srctrl.SymbolKind.FUNCTION),
+                            'parent_name': known_info.get('header', 'builtins'),
+                            'full_name': callee_name_short,
+                            'references': []
+                        }
+                        client.recordSymbolKind(
+                            global_id,
+                            srctrl.SymbolKind.FUNCTION,
+                            {
+                                'category': known_info['category'].value,
+                                'header': known_info.get('header', ''),
+                                'description': known_info.get('description', '')
                             }
-                            client.recordSymbolKind(printf_global_id, srctrl.SymbolKind.FUNCTION)
-                        
-                        referenced_full_name = 'printf'
-                        referenced_symbol_id = client.global_symbol_ids['printf']
-                
-                # 记录调用关系（适用于所有函数，包括printf）
+                        )
+
+                    # 使用全局函数符号进行引用
+                    referenced_full_name = callee_name_short
+                    referenced_symbol_id = client.global_symbol_ids[callee_name_short]
+
+                # 记录调用关系
                 context_symbol_id = client.current_context_id()
                 client.recordReference(
-                    context_symbol_id, 
-                    referenced_symbol_id, 
+                    context_symbol_id,
+                    referenced_symbol_id,
                     srctrl.ReferenceKind.CALL
                 )
         

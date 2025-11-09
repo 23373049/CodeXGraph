@@ -1,0 +1,11 @@
+from enum import Enum
+
+
+class FunctionCategory(Enum):
+    USER_DEFINED = 'USER_DEFINED'
+    STANDARD_LIBRARY = 'STANDARD_LIBRARY'
+    SYSTEM_CALL = 'SYSTEM_CALL'
+    EXTERNAL_LIBRARY = 'EXTERNAL_LIBRARY'
+    UNKNOWN = 'UNKNOWN'
+
+
