@@ -4,6 +4,13 @@ from mock_dependencies import (
     srctrl, symbolKindToString, referenceKindToString, 
     NameHierarchy, SourceRange
 )
+# 用于为函数生成描述的通用生成器（与 Python indexer 复用）
+try:
+    from modelscope_agent.environment.graph_database.indexer.method_description_generator import get_description_generator
+except Exception:
+    # 在某些独立测试环境下，该模块可能不可用；延迟处理时再退回到 mock
+    def get_description_generator():
+        return None
 import os 
 
 class AstVisitorClient:
@@ -336,6 +343,51 @@ class AstVisitorClient:
                 'file_path': self.symbol_data.get(name, {}).get('path', ''),
             }
             self.graphDB.add_node(kind, full_name=name, parms=node_parms)
+            print(f"  [CLIENT] Recorded Scope for {kind}: {name}")
+            # 如果是函数，尝试使用大模型生成描述并更新到节点属性
+            if kind == 'FUNCTION':
+                try:
+                    method_code = code
+                    method_name = self.symbol_data.get(name, {}).get('name', name)
+                    class_name = self.symbol_data.get(name, {}).get('parent_name', '')
+                    file_path = self.symbol_data.get(name, {}).get('file_path', '')
+
+                    # 尝试从 graphDB 获取邻接关系信息（若实现了该方法）
+                    relations = None
+                    if hasattr(self.graphDB, 'get_node_relations'):
+                        try:
+                            relations = self.graphDB.get_node_relations(name)
+                        except Exception:
+                            relations = None
+
+                    generator = get_description_generator()
+                    if generator is not None:
+                        print(f"  [CLIENT] Generating description for {name}...")
+                        description = generator.generate_method_description(
+                            method_code=method_code,
+                            method_name=method_name,
+                            class_name=class_name,
+                            file_path=file_path,
+                            relations=relations,
+                        )
+                        if description:
+                            # 优先使用 update_node（Neo4j 实现），否则回退到 add_node 来合并属性
+                            try:
+                                if hasattr(self.graphDB, 'update_node'):
+                                    # Neo4jGraphDatabase.update_node(node_id, properties)
+                                    try:
+                                        # 新接口（node_id, properties）
+                                        updated = self.graphDB.update_node(node_id=name, properties={'description': description})
+                                    except TypeError:
+                                        # 旧接口兼容（full_name, parms）
+                                        updated = self.graphDB.update_node(name, {'description': description})
+                                print(f"  [CLIENT] Description written for {name}")
+                            except Exception as e:
+                                print(f"  [CLIENT] Failed to write description for {name}: {e}")
+                    else:
+                        print("  [CLIENT] No description generator available; skipping description generation.")
+                except Exception as e:
+                    print(f"  [CLIENT] Exception during description generation for {name}: {e}")
             #print(f"  [CLIENT] Recorded Scope for {kind}: {name}")
 
     def resolve_referenced_symbol(self, callee_name_short: str):
