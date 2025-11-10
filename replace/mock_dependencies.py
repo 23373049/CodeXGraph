@@ -241,7 +241,7 @@ class MockSymbolReferenceRegistry:
             # 可以添加其他信息，如源范围等
         }
         self._references.append(reference_data)
-        print(f"  [SRCTR] Recorded Reference {reference_id}: {context_symbol_id} -> {referenceKindToString(reference_kind)} -> {referenced_symbol_id}")
+        #print(f"  [SRCTR] Recorded Reference {reference_id}: {context_symbol_id} -> {referenceKindToString(reference_kind)} -> {referenced_symbol_id}")
         return reference_id
 
     # === 新增方法：用于获取所有引用 ===

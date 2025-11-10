@@ -87,8 +87,13 @@ class CypherAgent(Agent):
             for idx, cypher in enumerate(cyphers):
                 user_response += (
                     f'### Extracted Cypher query {idx}:\n{cypher}\n')
-                cypher = add_label_to_nodes(cypher,
-                                            '`{}`'.format(self.task_id))
+                # Only add the task-specific label when a non-empty task_id is provided.
+                # If task_id is falsy (None or empty string), skip injecting the label so
+                # queries operate on the global graph labels as-is.
+                if self.task_id:
+                    cypher = add_label_to_nodes(cypher, f'`{self.task_id}`')
+                else:
+                    cypher = cypher
                 cypher_response, flag = self.graph_db.execute_query_with_timeout(
                     cypher)
 

@@ -1,7 +1,7 @@
 {
     "setting": {
         "prompt_path": "apps/codexgraph_agent/prompt",
-        "repo_path": "C:\\Users\\LENOVO\\Desktop\\CodeXGraph\\ms-agent\\replace\\my_repo",
+        "repo_path": "C:\\Users\\LENOVO\\Desktop\\testcode\\tinyhttpd-master",
         "llm_model_name": "deepseek-coder",
         "llm_temperature": 1.0,
         "max_iterations": 5,

@@ -97,7 +97,7 @@ class AstVisitorClient:
         self.scope_stack = ['code_repository_root', file_name]
         self.scope_id_stack = [self.symbol.record_symbol('code_repository_root'), file_id]
         
-        print(f"  [CLIENT] Processing new file module: {file_name}")
+        #print(f"  [CLIENT] Processing new file module: {file_name}")
         return file_name, file_id
 
 
@@ -388,6 +388,7 @@ class AstVisitorClient:
                         print("  [CLIENT] No description generator available; skipping description generation.")
                 except Exception as e:
                     print(f"  [CLIENT] Exception during description generation for {name}: {e}")
+            #print(f"  [CLIENT] Recorded Scope for {kind}: {name}")
 
     def resolve_referenced_symbol(self, callee_name_short: str):
         """
@@ -541,6 +542,7 @@ class AstVisitorClient:
                     
                 referenced_full_name_temp = ref_info['referenced_full_name']
                 referenced_short_name = referenced_full_name_temp.split('.')[-1]
+                reference_kind_str = ref_info.get('referenceKind', 'USAGE')
                 
                 # 尝试从全局定义中解析
                 resolved_full_name = self.global_symbol_definitions.get(referenced_short_name)
@@ -562,29 +564,40 @@ class AstVisitorClient:
                 if (current_edge_end_node_label == 'UNKNOWN' and 
                     referenced_full_name_temp != resolved_full_name):
                     should_update = True
-                    print(f"  [POST] Resolving {referenced_full_name_temp} -> {resolved_full_name} ({resolved_kind})")
+                    #print(f"  [POST] Resolving {referenced_full_name_temp} -> {resolved_full_name} ({resolved_kind})")
                 
                 # 场景2: 指向文件限定的符号，但找到了更明确的定义
                 elif ('.' in referenced_full_name_temp and 
                       referenced_full_name_temp != resolved_full_name and
                       resolved_kind not in ['UNKNOWN', 'FUNCTION_DECLARATION']):
                     should_update = True
-                    print(f"  [POST] Refining {referenced_full_name_temp} -> {resolved_full_name} ({resolved_kind})")
+                    #print(f"  [POST] Refining {referenced_full_name_temp} -> {resolved_full_name} ({resolved_kind})")
                 
                 if should_update:
                     edges_to_update.append({
                         'edge_id': edge_id,
                         'new_end_name': resolved_full_name,
                         'new_end_label': resolved_kind,
-                        'old_end_name': referenced_full_name_temp
+                        'old_end_name': referenced_full_name_temp,
+                        'reference_kind': reference_kind_str,
+                        'context_full_name': full_name_of_context,
                     })
         
         # 第二步：批量更新边
+        edge_type_map = {
+            'CALL': 'CALL',
+            'USAGE': 'USES',
+            'USES': 'USES',
+            'INCLUDE': 'INCLUDE',
+        }
         for update_info in edges_to_update:
+            edge_type = edge_type_map.get(update_info.get('reference_kind', 'USAGE'), 'USES')
             self.graphDB.update_edge(
-                update_info['edge_id'],
-                new_end_name=update_info['new_end_name'],
-                new_end_label=update_info['new_end_label']
+                edge_id=update_info['edge_id'],
+                source_id=update_info['context_full_name'],
+                edge_type=edge_type,
+                target_id=update_info['old_end_name'],
+                new_target_id=update_info['new_end_name'],
             )
             symbols_to_delete.add(update_info['old_end_name'])
         
@@ -669,8 +682,7 @@ class AstVisitorClient:
             
             actually_deleted.append(symbol_name)
         
-        if actually_deleted:
-            print(f"  [POST] Deleted {len(actually_deleted)} resolved/orphaned UNKNOWN nodes")
+        #if actually_deleted:
+            #print(f"  [POST] Deleted {len(actually_deleted)} resolved/orphaned UNKNOWN nodes")
         
-        print("--- 后处理引用关系完成 ---")
-        
+        #print("--- 后处理引用关系完成 ---")
