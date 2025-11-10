@@ -1,0 +1,22 @@
+{
+  "question": "please introduce httpd.c.bad_request to me",
+  "language": "c",
+  "task_id": "code_chat",
+  "prompt_path": "apps/codexgraph_agent/prompt/code_chat",
+  "schema_path": "apps/codexgraph_agent/prompt/graph_database",
+  "llm_config":                                                                                                                                                     {
+    "model": "deepseek-coder",
+    "model_server": "openai",
+    "api_base": "https://api.deepseek.com",
+    "api_key": "sk-d6462958a57b4922ac0974c6521809d9",
+    "generate_config": {
+      "temperature": 0.2
+    }
+  },
+  "graph_config": {
+    "uri": "bolt://localhost:7687",
+    "user": "neo4j",
+    "password": "GuoGuo0532",
+    "database_name": "neo4j"
+  }
+}
