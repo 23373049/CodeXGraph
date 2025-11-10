@@ -10,6 +10,7 @@ _HEADER_CATALOG = {
             'printf', 'fprintf', 'sprintf', 'snprintf', 'vprintf', 'vfprintf', 'vsprintf', 'vsnprintf',
             'scanf', 'fscanf', 'sscanf',
             'getchar', 'putchar', 'puts', 'fgets', 'fputs', 'fgetc', 'fputc', 'ungetc',
+            'getc', 'gets',
             'fread', 'fwrite',
             'fopen', 'freopen', 'fclose', 'fflush',
             'fseek', 'ftell', 'rewind', 'fgetpos', 'fsetpos',

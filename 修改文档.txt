@@ -1,13 +1,13 @@
-11.6修复问题如下：
-1. 删除了对于function节点的return_type, signature, parameters的记录，把内容全都写进code里
-2.处理了对于fopen，scrcpy等库函数识别错误为unknown地情况，添加了枚举类，现在可以正确识别为funxtion
-3. 处理了更新边的时候大量报错地情况，由修改边的终点改为建立新的边同时删除旧的
+11.10修复问题如下：
+1. 给函数声明添加了code，显示诸如int add (int a, b)的内容
+2. 修复了库函数没被调用就添加的问题
+3. 修复了有的函数声明嵌套在其他结构里识别不出来的问题
 
 tips：
-1.可以使用python replace/clear_database.py清除数据库里数据和索引
-2.本次使用github上的tinyhttpd代码库进行测试
+1. 可以使用python replace/clear_database.py清除数据库里数据和索引
+2. 本次使用github上的tinyhttpd代码库进行测试
+3. 可视化查询的时候有limit 25限制，删除可以看到全部节点
 
 
 存在的问题：
-1.对于#endif等条件编译，是否需要处理？
-2.仍有部分unknown亟需处理
+1. 部分function错误识别为unknown

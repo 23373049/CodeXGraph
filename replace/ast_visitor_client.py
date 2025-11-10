@@ -90,7 +90,7 @@ class AstVisitorClient:
         self.scope_stack = ['code_repository_root', file_name]
         self.scope_id_stack = [self.symbol.record_symbol('code_repository_root'), file_id]
         
-        print(f"  [CLIENT] Processing new file module: {file_name}")
+        #print(f"  [CLIENT] Processing new file module: {file_name}")
         return file_name, file_id
 
 
@@ -336,7 +336,7 @@ class AstVisitorClient:
                 'file_path': self.symbol_data.get(name, {}).get('path', ''),
             }
             self.graphDB.add_node(kind, full_name=name, parms=node_parms)
-            print(f"  [CLIENT] Recorded Scope for {kind}: {name}")
+            #print(f"  [CLIENT] Recorded Scope for {kind}: {name}")
 
     def resolve_referenced_symbol(self, callee_name_short: str):
         """
@@ -512,14 +512,14 @@ class AstVisitorClient:
                 if (current_edge_end_node_label == 'UNKNOWN' and 
                     referenced_full_name_temp != resolved_full_name):
                     should_update = True
-                    print(f"  [POST] Resolving {referenced_full_name_temp} -> {resolved_full_name} ({resolved_kind})")
+                    #print(f"  [POST] Resolving {referenced_full_name_temp} -> {resolved_full_name} ({resolved_kind})")
                 
                 # 场景2: 指向文件限定的符号，但找到了更明确的定义
                 elif ('.' in referenced_full_name_temp and 
                       referenced_full_name_temp != resolved_full_name and
                       resolved_kind not in ['UNKNOWN', 'FUNCTION_DECLARATION']):
                     should_update = True
-                    print(f"  [POST] Refining {referenced_full_name_temp} -> {resolved_full_name} ({resolved_kind})")
+                    #print(f"  [POST] Refining {referenced_full_name_temp} -> {resolved_full_name} ({resolved_kind})")
                 
                 if should_update:
                     edges_to_update.append({
@@ -630,7 +630,7 @@ class AstVisitorClient:
             
             actually_deleted.append(symbol_name)
         
-        if actually_deleted:
-            print(f"  [POST] Deleted {len(actually_deleted)} resolved/orphaned UNKNOWN nodes")
+        #if actually_deleted:
+            #print(f"  [POST] Deleted {len(actually_deleted)} resolved/orphaned UNKNOWN nodes")
         
-        print("--- 后处理引用关系完成 ---")
+        #print("--- 后处理引用关系完成 ---")
