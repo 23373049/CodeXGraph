@@ -154,6 +154,20 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                 "required": ["keyword"]
             }
         },
+        {
+            "name": "explain_feature_implementation",
+            "description": (
+                "根据功能关键词在项目中定位实现位置：在所有节点的 description 字段里检索包含该关键词的内容，"
+                "汇总哪些模块/类/函数实现了该功能，并给出简明说明。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keyword": {"type": "string", "description": "功能或能力的关键词，例如 '登录'、'鉴权'、'上传'"}
+                },
+                "required": ["keyword"]
+            }
+        },
     ]
 
     # 2. 本地实现每个function，返回Cypher
@@ -214,6 +228,17 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
             "RETURN DISTINCT labels(t) AS target_labels, t.name AS target_name, t.file_path AS target_file, "
             "collect(DISTINCT {from_labels: labels(caller), from_name: caller.name, rel: type(r1)}) AS callers, "
             "collect(DISTINCT {to_labels: labels(callee), to_name: callee.name, rel: type(r2)}) AS callees"
+        )
+
+    def explain_feature_implementation(self, keyword):
+        """根据功能关键词，查询 description 或 code 中包含该关键词的节点。"""
+        # 使用 toLower + coalesce 做鲁棒匹配，限制返回量避免输出过大
+        return (
+            f"MATCH (n) "
+            f"WHERE (exists(n.description) AND toLower(coalesce(n.description,'')) CONTAINS toLower('{keyword}')) "
+            "RETURN labels(n) AS node_type, n.name AS name, n.file_path AS file_path, n.signature AS signature, "
+            "n.description AS description, n.code AS code "
+            "LIMIT 200"
         )
     # 3. LLM调用时传入所有function schema
     def function_call_llm(self, user_query: str):
@@ -440,6 +465,39 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                 else:
                     summary_prompt += "未检索到显著的引用/调用节点。\n"
 
+                analysis = self.llm_call([{"role": "user", "content": summary_prompt}])
+                return analysis
+            elif callinfo['name'] == 'explain_feature_implementation':
+                # 收敛检索到的实现片段，优先利用 description，辅以 code 片段，生成聚合说明
+                feature = callinfo.get('arguments', {}).get('keyword', '')
+                details = "\n【候选实现片段】\n"
+                summary_prompt = (
+                    "你是代码审查助手。请基于下列节点的 description 与 code 内容，\n"
+                    "从“功能实现角度”回答：该功能主要由哪些模块/类/函数共同实现，各自负责什么，\n"
+                    "并给出一个简洁、结构化的中文说明（先给结论，再给依据）。\n"
+                )
+                if feature:
+                    summary_prompt += f"\n目标功能关键词：{feature}\n"
+                if isinstance(user_response, list):
+                    for node in user_response[:50]:  # 控制体量
+                        details += (
+                            f"类型: {node.get('node_type','')}\n"
+                            f"名称: {node.get('name','')}\n"
+                            f"路径: {node.get('file_path','')}\n"
+                            f"签名: {node.get('signature','')}\n"
+                            f"说明: {node.get('description','')[:500]}\n"
+                            f"代码: {node.get('code','')[:500]}\n\n"
+                        )
+                else:
+                    details += str(user_response)
+
+                summary_prompt += details
+                summary_prompt += (
+                    "\n请输出：\n"
+                    "1) 结论（一句话）：本功能的实现集中在哪些关键部件；\n"
+                    "2) 关键实现清单：每个部件一句话职责（尽量引用节点名称与路径）；\n"
+                    "3) 依据摘录：挑选若干最能支撑判断的 description/代码片段（可精简）。\n"
+                )
                 analysis = self.llm_call([{"role": "user", "content": summary_prompt}])
                 return analysis
             # find_nodes_in_file 查询，先输出节点详细信息，再用 LLM 分析

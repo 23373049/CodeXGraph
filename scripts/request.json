@@ -1,5 +1,5 @@
 {
-  "question": "please introduce httpd.c.bad_request to me",
+  "question": "find function with httpd.c.bad_request",
   "language": "c",
   "task_id": "code_chat",
   "prompt_path": "apps/codexgraph_agent/prompt/code_chat",
