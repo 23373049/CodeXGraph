@@ -9,6 +9,9 @@ from modelscope_agent.agents.codexgraph_agent.utils.code_utils import \
 from modelscope_agent.agents.codexgraph_agent.utils.prompt_utils import (
     load_prompt_template, replace_system_prompt)
 from modelscope_agent.environment.graph_database import GraphDatabaseHandler
+import logging
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a software developer maintaining a large project.
 You are working on an issue submitted to your project.
@@ -229,6 +232,16 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 response = json.loads(response)
             except Exception:
                 pass
+        # 可视化工具选择过程：把 LLM 的原始输出和解析后结果发送到 agent 消息流
+        try:
+            raw = response if not isinstance(response, dict) else str(response)
+        except Exception:
+            raw = repr(response)
+        msg = f"[Tool selection] user_query={user_query} | raw_response={raw}"
+        try:
+            self.update_agent_message(msg)
+        except Exception:
+            logger.debug(msg)
         return response
 
     def dispatch_function_call(self, callinfo: dict) -> str:
@@ -237,21 +250,60 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         """
         name = callinfo.get("name")
         arguments = callinfo.get("arguments", {})
+        # 记录分发过程
+        try:
+            self.update_agent_message(f"[Dispatch] calling function '{name}' with arguments: {arguments}")
+        except Exception:
+            logger.debug("Dispatch: %s %s", name, arguments)
         func = getattr(self, name, None)
         if func:
-            return func(**arguments)
+            cypher = func(**arguments)
+            # 把生成的 Cypher 输出到消息流，便于观察
+            try:
+                self.update_agent_message(f"[Cypher] {cypher}")
+            except Exception:
+                logger.debug("Cypher: %s", cypher)
+            return cypher
         return ""
     # ---- end reusable functions ----
 
     def find_nodes_in_file(self, keyword):
-        # 通用查询，适用于 C/其他语言的 file_path 属性
         return f"MATCH (n) WHERE n.file_path CONTAINS '{keyword}' RETURN labels(n) AS node_type, n.name, n.file_path, n"
 
+    def find_class_by_keyword(self, keyword):
+        labels = self._label_map()
+        class_label = labels.get('class_label', 'CLASS')
+        return f"MATCH (c:{class_label}) WHERE c.name CONTAINS '{keyword}' RETURN c.name, c.file_path, c.signature, c.code"
+
+    def find_function_by_keyword(self, keyword):
+        labels = self._label_map()
+        method_label = labels.get('method_label', 'FUNCTION')
+        return f"MATCH (f:{method_label}) WHERE f.name CONTAINS '{keyword}' RETURN f.name, f.file_path, f.signature, f.code"
+
+    def introduce_entity(self, keyword):
+        return f"MATCH (n) WHERE n.name CONTAINS '{keyword}' RETURN labels(n) AS node_type, n.name, n.file_path, n.code"
+
     def find_references(self, keyword):
-        # 查找与目标实体有引用/调用关系的节点，兼容 CALL/USES 等关系名
+        """查找引用关系：查找与目标实体通过常见引用/调用关系相连的节点，并返回节点与关系信息。"""
+        # 匹配 CALLS / USES / DEPENDS_ON 等关系（如果图模型使用不同关系名，需调整）
         return (
-            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' \n"
+            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' \\n"
             "MATCH (a)-[r]->(t) RETURN labels(a) AS from_labels, a.name AS from_name, type(r) AS rel, labels(t) AS to_labels, t.name AS to_name, t.file_path AS to_file"
+        )
+
+    def find_call_hierarchy(self, keyword):
+        """查找调用层级：返回与目标实体相关的上游调用者（callers）和下游被调用者（callees）。
+        默认只展开 1..2 层 CALLS 关系以避免结果爆炸。"""
+        # 尝试同时匹配 CALLS 和 USES 两种常见的调用/依赖关系，兼容不同图模型
+        # 注意：某些 Cypher 引擎对 [:TYPE1|TYPE2*min..max] 的语法支持可能不同，
+        # 若执行报错，可改为分别查询或使用 WHERE type(r) IN [...] 形式。
+        return (
+            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
+            "OPTIONAL MATCH (caller)-[r1:CALLS|USES*1..2]->(t) "
+            "OPTIONAL MATCH (t)-[r2:CALLS|USES*1..2]->(callee) "
+            "RETURN DISTINCT labels(t) AS target_labels, t.name AS target_name, t.file_path AS target_file, "
+            "collect(DISTINCT {from_labels: labels(caller), from_name: caller.name, rel: type(r1)}) AS callers, "
+            "collect(DISTINCT {to_labels: labels(callee), to_name: callee.name, rel: type(r2)}) AS callees"
         )
 
     def question_to_cypher(self, question: str) -> str:
@@ -299,6 +351,12 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 else:
                     node_info += str(user_response)
 
+                # 输出工具返回的原始结果到 agent 消息流，便于追踪
+                try:
+                    self.update_agent_message(f"[Tool result] {str(user_response)[:2000]}")
+                except Exception:
+                    logger.debug("Tool result: %s", user_response)
+
                 # 请求 LLM 基于查询结果给出简要分析
                 try:
                     analysis = self.llm_call([{'role': 'user', 'content': f'请基于以下查询结果做简明中文分析：\n{node_info}'}])
@@ -332,77 +390,73 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         self.chat_history.append(('system', self.system_prompts))
 
         for iter in range(self.max_iterations):
-            response_text = self.llm_call(messages)
-            messages.append({'role': 'assistant', 'content': response_text})
+            response = self.llm_call(messages)
+            import json
+            # 尝试把 LLM 输出解析为 JSON，如果是字符串形式的 JSON 列表/字典，则转换
+            if isinstance(response, str):
+                try:
+                    response = json.loads(response)
+                except Exception:
+                    pass
 
-            extracted_analysis, _ = extract_text_between_markers(
-                response_text, '[start_of_analysis]', '[end_of_analysis]')
-            extracted_code_search, _ = extract_text_between_markers(
-                response_text, '[start_of_code_search]',
-                '[end_of_code_search]')
-            extracted_bug_location, _ = extract_text_between_markers(
-                response_text, '[start_of_bug_locations]',
-                '[end_of_bug_locations]')
+            # 支持单调用或多调用计划（LLM 可能返回列表）
+            if callinfo:
+                calls_list = []
+                if isinstance(callinfo, list):
+                    calls_list = callinfo
+                elif isinstance(callinfo, dict) and 'name' in callinfo:
+                    calls_list = [callinfo]
 
-            self.update_agent_message(
-                response_to_msg(extracted_analysis, extracted_code_search,
-                                extracted_bug_location))
+                if calls_list:
+                    aggregated_results = []
+                    # 按序执行每个工具调用
+                    for idx, single_call in enumerate(calls_list, start=1):
+                        try:
+                            self.update_agent_message(f"[Dispatch] calling function '{single_call.get('name')}' with arguments: {single_call.get('arguments')}")
+                        except Exception:
+                            logger.debug("Dispatch message failed for %s", single_call)
 
-            if not extracted_code_search and not extracted_bug_location:
-                msg = (
-                    'The text between the markers [start_of_code_search] and [end_of_code_search], '
-                    'as well as the text between the markers [start_of_bug_locations] '
-                    'and [end_of_bug_locations], is empty.')
-                messages.append({'role': 'user', 'content': msg})
-                continue
-            elif extracted_code_search:
-                cypher_queries = self.cypher_queries_template.substitute(
-                    text_queries=extracted_code_search)
-                user_response = self.cypher_agent.run(
-                    cypher_queries, retries=self.max_iterations_cypher)
+                        cypher_query = self.dispatch_function_call(single_call)
+                        if not cypher_query:
+                            aggregated_results.append({'call': single_call, 'result': None, 'error': 'no cypher generated'})
+                            continue
 
-                if not user_response:
-                    msg = (
-                        'Cypher Code Assistant encountered issues while processing Cypher queries. '
-                        'Please try writing simpler and clearer text queries, and ensure '
-                        'that the corresponding parameters are correct.')
-                    messages.append({'role': 'user', 'content': msg})
-                else:
-                    messages.append({'role': 'user', 'content': user_response})
-                    self.update_user_message(user_response)
+                        try:
+                            user_response = self.cypher_agent.run(cypher_query, retries=self.max_iterations_cypher)
+                        except Exception as e:
+                            logger.exception("cypher_agent.run failed")
+                            aggregated_results.append({'call': single_call, 'result': None, 'error': str(e)})
+                            continue
 
-            elif extracted_bug_location:
-                cypher_queries = self.cypher_queries_buggy_template.substitute(
-                    text_queries=extracted_code_search)
-                user_response = self.cypher_agent.run(
-                    cypher_queries, retries=self.max_iterations_cypher)
+                        # 尝试将结果标准化并记录
+                        aggregated_results.append({'call': single_call, 'result': user_response})
 
-                if not user_response:
-                    msg = (
-                        'Cypher Code Assistant encountered issues while processing Cypher queries. '
-                        'Please try writing simpler and clearer text queries, and ensure that the '
-                        'corresponding parameters are correct.')
-                    messages.append({'role': 'user', 'content': msg})
-                    continue
+                        # 把每个工具返回可视化
+                        try:
+                            self.update_agent_message(f"[Tool result #{idx}] {str(user_response)[:2000]}")
+                            # 也把部分结果放到用户消息区，便于 UI 立刻可见
+                            self.update_user_message(str(user_response)[:2000])
+                        except Exception:
+                            logger.debug("Failed to push tool result to UI")
 
-                collated_tool_response = f'Here is the code in buggy locations:\n\n{user_response}'
+                    # 将聚合结果格式化为 node_info，交给 LLM 做统一分析
+                    node_info = "\n【聚合工具调用结果】\n"
+                    for entry in aggregated_results:
+                        call = entry.get('call')
+                        res = entry.get('result')
+                        err = entry.get('error')
+                        node_info += f"- call: {call.get('name')} args={call.get('arguments')}\n"
+                        if err:
+                            node_info += f"  error: {err}\n"
+                        else:
+                            node_info += f"  result: {str(res)[:1000]}\n"
 
-                if 'Node' not in user_response:
-                    collated_tool_response += (
-                        '\n\nIt seems that buggy locations are missing. '
-                        'Please try again.')
-                    messages.append({
-                        'role': 'user',
-                        'content': collated_tool_response
-                    })
-                    continue
+                    try:
+                        analysis = self.llm_call([{'role': 'user', 'content': f'请基于以下查询结果做简明中文分析：\n{node_info}'}])
+                    except Exception:
+                        analysis = ''
 
-                messages.append({
-                    'role': 'user',
-                    'content': collated_tool_response
-                })
-                self.update_user_message(collated_tool_response)
-                break
+                    return f"{node_info}\n【自动分析总结】\n{analysis}"                
 
             msg = "Let's analyze collected context first."
             messages.append({'role': 'user', 'content': msg})
