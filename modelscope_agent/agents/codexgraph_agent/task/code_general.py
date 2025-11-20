@@ -54,6 +54,8 @@ class CodexGraphAgentGeneral(Agent, ABC):
 
         self.action_type = 'ACTIONS'
         self.generate_message = 'You are ready to do generate New Code.'
+        # 保存语言以便子类规则处理（例如 C 需要使用 STRUCT 而非 CLASS）
+        self.language = language
 
         self.set_action_type_and_message()
 
@@ -159,13 +161,6 @@ class CodexGraphAgentGeneral(Agent, ABC):
 
     def get_chat_history(self):
         return self.chat_history
-
-
-class CodexGraphAgentCommenter(CodexGraphAgentGeneral):
-
-    def set_action_type_and_message(self):
-        self.action_type = 'ADD_COMMENTS'
-        self.generate_message = 'You are ready to add code comments.'
 
 
 class CodexGraphAgentGenerator(CodexGraphAgentGeneral):

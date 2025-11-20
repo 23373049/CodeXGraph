@@ -43,28 +43,28 @@ def test_calculator():
 (:CLASS {name: "BaseCalculator", file_path: "my_project/advanced_math.py", signature: "class BaseCalculator:", body_range: [6, 10]})
 
 // METHOD node for BaseCalculator.__init__
-(:METHOD {name: "__init__", file_path: "my_project/advanced_math.py", class: "BaseCalculator", code: "def __init__(self, initial_value=0):\n        self.value = initial_value\n", signature: "def __init__(self, initial_value=0)", body_range: [7, 7], description: "该方法用于初始化计算器对象，设置初始值"})
+(:METHOD {name: "__init__", file_path: "my_project/advanced_math.py", class: "BaseCalculator", code: "def __init__(self, initial_value=0):\n        self.value = initial_value\n", signature: "def __init__(self, initial_value=0)", body_range: [7, 7]})
 
 // METHOD node for BaseCalculator.get_value
-(:METHOD {name: "get_value", file_path: "my_project/advanced_math.py", class: "BaseCalculator", code: "def get_value(self):\n        return self.value\n", signature: "def get_value(self)", body_range: [10, 10], description: "该方法用于获取计算器的当前值"})
+(:METHOD {name: "get_value", file_path: "my_project/advanced_math.py", class: "BaseCalculator", code: "def get_value(self):\n        return self.value\n", signature: "def get_value(self)", body_range: [10, 10]})
 
 // CLASS node for AdvancedCalculator
 (:CLASS {name: "AdvancedCalculator", file_path: "my_project/advanced_math.py", signature: "class AdvancedCalculator(BaseCalculator):", body_range: [14, 26]})
 
 // METHOD node for AdvancedCalculator.add
-(:METHOD {name: "add", file_path: "my_project/advanced_math.py", class: "AdvancedCalculator", code: "def add(self, amount):\n        self.value += amount\n        return self.value\n", signature: "def add(self, amount)", body_range: [15, 16], description: "该方法用于将指定数值加到计算器的当前值上"})
+(:METHOD {name: "add", file_path: "my_project/advanced_math.py", class: "AdvancedCalculator", code: "def add(self, amount):\n        self.value += amount\n        return self.value\n", signature: "def add(self, amount)", body_range: [15, 16]})
 
 // METHOD node for AdvancedCalculator.multiply
-(:METHOD {name: "multiply", file_path: "my_project/advanced_math.py", class: "AdvancedCalculator", code: "def multiply(self, multiplier):\n        self.value *= multiplier\n        return self.value\n", signature: "def multiply(self, multiplier)", body_range: [19, 20], description: "该方法用于将计算器的当前值乘以指定的乘数"})
+(:METHOD {name: "multiply", file_path: "my_project/advanced_math.py", class: "AdvancedCalculator", code: "def multiply(self, multiplier):\n        self.value *= multiplier\n        return self.value\n", signature: "def multiply(self, multiplier)", body_range: [19, 20]})
 
 // METHOD node for AdvancedCalculator.compute_circle_area
-(:METHOD {name: "compute_circle_area", file_path: "my_project/advanced_math.py", class: "AdvancedCalculator", code: "def compute_circle_area(self, radius):\n        return self.multiply(GLOBAL_CONSTANT) * self.square(radius)\n", signature: "def compute_circle_area(self, radius)", body_range: [23, 23], description: "该方法用于计算圆的面积，使用π乘以半径的平方"})
+(:METHOD {name: "compute_circle_area", file_path: "my_project/advanced_math.py", class: "AdvancedCalculator", code: "def compute_circle_area(self, radius):\n        return self.multiply(GLOBAL_CONSTANT) * self.square(radius)\n", signature: "def compute_circle_area(self, radius)", body_range: [23, 23]})
 
 // METHOD node for AdvancedCalculator.square
-(:METHOD {name: "square", file_path: "my_project/advanced_math.py", class: "AdvancedCalculator", code: "def square(self, number):\n        return number * number\n", signature: "def square(self, number)", body_range: [26, 26], description: "该方法用于计算一个数的平方值"})
+(:METHOD {name: "square", file_path: "my_project/advanced_math.py", class: "AdvancedCalculator", code: "def square(self, number):\n        return number * number\n", signature: "def square(self, number)", body_range: [26, 26]})
 
 // FUNCTION node for test_calculator
-(:FUNCTION {name: "test_calculator", file_path: "my_project/advanced_math.py", code: "def test_calculator():\n    calc = AdvancedCalculator()\n    calc.add(10)\n    calc.compute_circle_area(5)\n    return calc.get_value()\n", signature: "def test_calculator()", body_range: [30, 33], description: "该函数用于测试计算器的功能，包括加法和圆面积计算"})
+(:FUNCTION {name: "test_calculator", file_path: "my_project/advanced_math.py", code: "def test_calculator():\n    calc = AdvancedCalculator()\n    calc.add(10)\n    calc.compute_circle_area(5)\n    return calc.get_value()\n", signature: "def test_calculator()", body_range: [30, 33]})
 
 // GLOBAL_VARIABLE node for GLOBAL_CONSTANT
 (:GLOBAL_VARIABLE {name: "GLOBAL_CONSTANT", file_path: "my_project/advanced_math.py"})

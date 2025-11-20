@@ -1,0 +1,65 @@
+### C Code to be Annotated:
+<code>
+```c
+${file_path}
+${user_query}
+```
+</code>
+
+### Task Instructions:
+Your ultimate goal is to insert meaningful, Doxygen-style block comments for every function present in the content enclosed by <code> and </code>. First analyze the code to understand its intent, side effects, parameter semantics, and return values. You have two allowed actions:
+1. `ADD_COMMENTS`: Use this when you are confident you can write the final comments immediately.
+2. `TEXT_QUERIES`: Use this to request extra context from the graph database (e.g., find struct definitions or related helper functions).
+
+#### Detailed Comment Notes:
+Each function comment should include:
+1. **Brief Description**: One or two sentences describing the function's responsibility.
+2. **@param entries**: One per argument, specifying purpose, expected range, pointer direction (in/out), and ownership if relevant. If the function has no parameters, omit the section.
+3. **@return/@retval**: Describe the return value or state explicitly; if the function returns `void`, include `@return void`.
+4. **@note/@warning (optional)**: Mention side effects, required preconditions, or error scenarios.
+
+Example format:
+```c
+/**
+ * @brief Initialize the UART peripheral with the requested configuration.
+ *
+ * @param uart    Pointer to the UART descriptor (must not be NULL).
+ * @param config  Desired baud rate and parity settings.
+ *
+ * @return int 0 on success, negative errno-style code on failure.
+ * @note This call configures GPIO pins and clocks as a side effect.
+ */
+```
+
+#### Final Output Format:
+Return JSON in the following format:
+```json
+{"thought": "$$THOUGHT", "action": "$$ACTION_NAME", "action_input": "$$INPUT"}
+```
+- For `ADD_COMMENTS`, set `action_input` to the concrete plan or notes that justify the final comments you will produce next.
+- For `TEXT_QUERIES`, `action_input` must follow:
+```
+[start_of_text_queries]
+### Text Query 1
+<text_description_of_the_query>
+
+### Text Query 2
+<text_description_of_the_query>
+...
+### Text Query n
+<text_description_of_the_query>
+[end_of_text_queries]
+```
+- In `thought`, explain your current understanding of the code and why you chose the action.
+
+#### Notes:
+1. Use `TEXT_QUERIES` when imports/header references imply additional context you are missing.
+2. Queries must reference concrete module/file names (e.g., `drivers/i2c/bus.c`) and known symbols; avoid vague descriptions.
+3. Follow the provided schema strictly—do not invent node/edge types.
+4. Preferred query ideas:
+   - Retrieve all functions defined in `foo/bar.c`.
+   - Find the struct definition for `struct driver_ctx`.
+   - List all functions whose names contain `init` under module `os.kernel`.
+5. Only perform one action per round.
+6. Avoid issuing `ADD_COMMENTS` if you have not yet verified the function purpose or parameter meaning.
+

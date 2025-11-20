@@ -39,6 +39,7 @@ class CodeCommenterPage(PageBase):
         schema_path = str(
             Path(st.session_state.shared['setting']['prompt_path']).joinpath(
                 'graph_database'))
+        language = st.session_state.shared['setting'].get('language', 'python')
 
         try:
             agent = CodexGraphAgentCommenter(
@@ -46,6 +47,7 @@ class CodeCommenterPage(PageBase):
                 prompt_path=prompt_path,
                 schema_path=schema_path,
                 task_id=st.session_state.shared['setting']['project_id'],
+                language=language,
                 graph_db=graph_db,
                 max_iterations=max_iterations,
                 message_callback=self.create_update_message())

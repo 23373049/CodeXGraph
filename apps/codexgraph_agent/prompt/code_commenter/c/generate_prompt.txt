@@ -1,0 +1,32 @@
+${message} Please add standardized Doxygen-style comments to the C code below:
+
+### Code to be Annotated:
+```c
+${file_path}
+${user_query}
+```
+
+#### Final Output Format:
+Return the fully annotated C code in a fenced block:
+```c
+{code_with_annotations}
+```
+
+#### Comment Requirements:
+1. Begin each function comment with `/**` and end with `*/`.
+2. Include `@brief`, followed by a concise summary.
+3. Add one `@param` line per parameter in declaration order, describing purpose and pointer direction (input/output).
+4. Provide `@return` (or `@retval` entries) describing the meaning of the return value; for `void` functions, state `@return void`.
+5. Optionally add `@note`, `@warning`, or `@retval` sections if there are notable edge cases or multiple return codes.
+
+Example:
+```c
+/**
+ * @brief Initialize the watchdog timer.
+ *
+ * @param timeout_ms Timeout in milliseconds (must be > 0).
+ *
+ * @return int 0 on success, negative errno code on failure.
+ */
+```
+

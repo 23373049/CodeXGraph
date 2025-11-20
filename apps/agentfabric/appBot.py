@@ -121,11 +121,11 @@ with demo:
         if 'user_agent' not in _state:
             init_user(_state, _user_token)
 
-        kwargs = {
-            name.lower(): os.getenv(value.value)
-            for name, value in ApiNames.__members__.items()
-        }
-
+        # kwargs = {
+        #     name.lower(): os.getenv(value.value)
+        #     for name, value in ApiNames.__members__.items()
+        # }
+        kwargs = {}
         # 将发送的消息添加到聊天历史
         _uuid_str = check_uuid(uuid_str)
         user_agent = _state['user_agent']
@@ -150,9 +150,19 @@ with demo:
         # get short term memory history
         history = user_memory.get_history()
 
+        # skip
+        filtered_files = [
+            item for item in append_files
+            if not item.lower().endswith(('.jpeg', '.png', '.jpg', '.wav',
+                                          '.gif', '.mp3'))
+        ]
+
         use_llm = True if len(user_agent.function_list) else False
         ref_doc = user_memory.run(
-            query=input.text, url=append_files, checked=True, use_llm=use_llm)
+            query=input.text,
+            url=filtered_files,
+            checked=True,
+            use_llm=use_llm)
 
         response = ''
         try:

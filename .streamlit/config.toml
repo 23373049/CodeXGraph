@@ -1,6 +1,5 @@
 # .streamlit/config.toml
 
 [global]
-# Streamlit no longer supports the `global.pythonpath` config option.
-# If you need to modify PYTHONPATH for app imports, set the PYTHONPATH
-# environment variable before starting Streamlit or update your launcher.
+# Set the PYTHONPATH to include the project root directory
+pythonpath = "${PYTHONPATH}"

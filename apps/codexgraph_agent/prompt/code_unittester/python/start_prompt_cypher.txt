@@ -48,23 +48,3 @@ MATCH (m)-[:CONTAINS]->(f:FUNCTION)
 WHERE f.name =~ '.*b'
 RETURN m, f
 ```
-
-Search by description examples:
-1. Search methods by description (fuzzy matching):
-```
-MATCH (m:METHOD) 
-WHERE m.description =~ '.*<keyword>.*' 
-RETURN m.name, m.description, m.code
-```
-2. Search functions by description (fuzzy matching):
-```
-MATCH (f:FUNCTION) 
-WHERE f.description =~ '.*<keyword>.*' 
-RETURN f.name, f.description, f.code
-```
-3. Search both methods and functions by description:
-```
-MATCH (n) 
-WHERE (n:METHOD OR n:FUNCTION) AND n.description =~ '.*<keyword>.*' 
-RETURN n.name, n.description, n.code, labels(n) as node_type
-```

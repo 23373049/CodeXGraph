@@ -22,7 +22,7 @@ def main():
     print(f"PYTHONPATH is set to: {os.environ['PYTHONPATH']}")
 
     # Run the Streamlit app
-    subprocess.run(['py', '-m', 'streamlit', 'run', streamlit_app_path])
+    subprocess.run(['streamlit', 'run', streamlit_app_path])
 
 
 if __name__ == '__main__':

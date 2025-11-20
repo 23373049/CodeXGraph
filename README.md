@@ -1,594 +1,264 @@
-# 方法描述生成器实现文档
+<h1> ModelScope-Agent: Building Your Customizable Agent System with Open-source Large Language Models</h1>
 
-## 概述
+<p align="center">
+    <br>
+    <img src="https://modelscope.oss-cn-beijing.aliyuncs.com/modelscope.gif" width="400"/>
+    <br>
+<p>
 
-本文档详细说明了为实现智能方法描述生成功能（包含结构关系分析）所做的代码修改，以及如何扩展该功能。
+<p align="center">
+<a href="https://modelscope.cn/home">Modelscope Hub</a> ｜ <a href="https://arxiv.org/abs/2309.00986">Paper</a> ｜ <a href="https://modelscope.cn/studios/damo/ModelScopeGPT/summary">Demo</a>
+<br>
+        <a href="README_CN.md">中文</a>&nbsp ｜ &nbspEnglish
+</p>
 
----
+<p align="center">
+<img src="https://img.shields.io/badge/python-%E2%89%A53.8-5be.svg">
+<a href='https://modelscope-agent.readthedocs.io/en/latest/?badge=latest'>
+    <img src='https://readthedocs.org/projects/modelscope-agent/badge/?version=latest' alt='Documentation Status' />
+</a>
+<a href="https://github.com/modelscope/modelscope"><img src="https://img.shields.io/badge/modelscope[framework]-%E2%89%A51.16.0-5D91D4.svg"></a>
+<a href="https://github.com/modelscope/modelscope-agent/actions?query=branch%3Amaster+workflow%3Acitest++"><img src="https://img.shields.io/github/actions/workflow/status/modelscope/modelscope-agent/citest.yaml?branch=master&logo=github&label=CI"></a>
+<a href="https://github.com/modelscope/modelscope-agent/blob/main/LICENSE"><img src="https://img.shields.io/github/license/modelscope/modelscope-agent"></a>
+<a href="https://github.com/modelscope/modelscope-agent/pulls"><img src="https://img.shields.io/badge/PR-welcome-55EB99.svg"></a>
+<a href="https://pypi.org/project/modelscope-agent/"><img src="https://badge.fury.io/py/modelscope-agent.svg"></a>
+<a href="https://pepy.tech/project/modelscope-agent"><img src="https://pepy.tech/badge/modelscope-agent"></a>
+</p>
 
-## 功能目标
+<p align="center">
+<a href="https://trendshift.io/repositories/323" target="_blank"><img src="https://trendshift.io/api/badge/repositories/323" alt="modelscope%2Fmodelscope-agent | Trendshift" style="width: 250px; height: 55px;" width="250" height="55"/></a>
+</p>
 
-实现一个智能的方法描述生成器，能够：
-1. 自动分析方法代码，生成简洁的中文描述
-2. **分析节点周围的关系**（谁调用了我、我调用了谁、继承关系等）
-3. 将关系信息融合到描述中，提供全局上下文
-4. 集成到图数据库构建流程中，自动为METHOD节点生成描述
+## Introduction
 
----
+Modelscope-Agent is a customizable and scalable Agent framework. A single agent has abilities such as role-playing, LLM calling, tool usage, planning, and memory.
+It mainly has the following characteristics:
 
-## 代码修改详情
+- **Simple Agent Implementation Process**: Simply specify the role instruction, LLM name, and tool name list to implement an Agent application. The framework automatically arranges workflows for tool usage, planning, and memory.
+- **Rich models and tools**: The framework is equipped with rich LLM interfaces, such as Dashscope and Modelscope model interfaces, OpenAI model interfaces, etc. Built in rich tools, such as **code interpreter**, **weather query**, **text to image**, **web browsing**, etc., make it easy to customize exclusive agents.
+- **Unified interface and high scalability**: The framework has clear tools and LLM registration mechanism, making it convenient for users to expand more diverse Agent applications.
+- **Low coupling**: Developers can easily use built-in tools, LLM, memory, and other components without the need to bind higher-level agents.
 
-### 1. `modelscope_agent/environment/graph_database/indexer/my_graph_db.py` - 添加关系查询功能
 
-**修改位置**: 在 `GraphDatabaseHandler` 类中新增 `get_node_relations` 方法
+## 🎉 News
+* 🔥🔥🔥Aug 8, 2024: A new graph based code generation tool [CodexGraph](https://arxiv.org/abs/2408.03910) is released by Modelscope-Agent, it has been proved effective and versatile on various code related tasks, please check [example](https://github.com/modelscope/modelscope-agent/tree/master/apps/codexgraph_agent).
+* 🔥🔥Aug 1, 2024: A high efficient and reliable Data Science Assistant is running on Modelscope-Agent, please find detail in [example](https://github.com/modelscope/modelscope-agent/tree/master/apps/datascience_assistant).
+* 🔥July 17, 2024: Parallel tool calling on Modelscope-Agent-Server, please find detail in [doc](https://github.com/modelscope/modelscope-agent/blob/master/modelscope_agent_servers/README.md).
+* 🔥June 17, 2024: Upgrading RAG flow based on LLama-index, allow user to hybrid search knowledge by different strategies and modalities, please find detail in [doc](https://github.com/modelscope/modelscope-agent/blob/master/modelscope_agent/rag/README_zh.md).
+* 🔥June 6, 2024: With [Modelscope-Agent-Server](https://github.com/modelscope/modelscope-agent/blob/master/modelscope_agent_servers/README.md), **Qwen2** could be used by OpenAI SDK with tool calling ability, please find detail in [doc](https://github.com/modelscope/modelscope-agent/blob/master/docs/llms/qwen2_tool_calling.md).
+* 🔥June 4, 2024: Modelscope-Agent supported Mobile-Agent-V2[arxiv](https://arxiv.org/abs/2406.01014)，based on Android Adb Env, please check in the [application](https://github.com/modelscope/modelscope-agent/tree/master/apps/mobile_agent).
+* 🔥May 17, 2024: Modelscope-Agent supported multi-roles room chat in the [gradio](https://github.com/modelscope/modelscope-agent/tree/master/apps/multi_roles_chat_room).
+* May 14, 2024: Modelscope-Agent supported image input in `RolePlay` agents with latest OpenAI model `GPT-4o`. Developers can experience this feature by specifying the `image_url` parameter.
+* May 10, 2024: Modelscope-Agent launched a user-friendly `Assistant API`, and also provided a `Tools API` that executes utilities in isolated, secure containers, please find the [document](https://github.com/modelscope/modelscope-agent/blob/master/modelscope_agent_servers/)
+* Apr 12, 2024: The [Ray](https://docs.ray.io/en/latest/) version of multi-agent solution is on modelscope-agent, please find the [document](https://github.com/modelscope/modelscope-agent/blob/master/modelscope_agent/multi_agents_utils/README.md)
+* Mar 15, 2024: Modelscope-Agent and the [AgentFabric](https://github.com/modelscope/modelscope-agent/tree/master/apps/agentfabric) (opensource version for GPTs) is running on the production environment of [modelscope studio](https://modelscope.cn/studios/agent).
+* Feb 10, 2024: In Chinese New year, we upgrade the modelscope agent to version v0.3 to facilitate developers to customize various types of agents more conveniently through coding and make it easier to make multi-agent demos. For more details, you can refer to [#267](https://github.com/modelscope/modelscope-agent/pull/267) and [#293](https://github.com/modelscope/modelscope-agent/pull/293) .
+* Nov 26, 2023: [AgentFabric](https://github.com/modelscope/modelscope-agent/tree/master/apps/agentfabric) now supports collaborative use in ModelScope's [Creation Space](https://modelscope.cn/studios/modelscope/AgentFabric/summary), allowing for the sharing of custom applications in the Creation Space. The update also includes the latest [GTE](https://modelscope.cn/models/damo/nlp_gte_sentence-embedding_chinese-base/summary) text embedding integration.
+* Nov 17, 2023: [AgentFabric](https://github.com/modelscope/modelscope-agent/tree/master/apps/agentfabric) released, which is an interactive framework to facilitate creation of agents tailored to various real-world applications.
+* Oct 30, 2023: [Facechain Agent](https://modelscope.cn/studios/CVstudio/facechain_agent_studio/summary) released a local version of the Facechain Agent that can be run locally. For detailed usage instructions, please refer to [Facechain Agent](#facechain-agent).
+* Oct 25, 2023: [Story Agent](https://modelscope.cn/studios/damo/story_agent/summary) released a local version of the Story Agent for generating storybook illustrations. It can be run locally. For detailed usage instructions, please refer to [Story Agent](#story-agent).
+* Sep 20, 2023: [ModelScope GPT](https://modelscope.cn/studios/damo/ModelScopeGPT/summary) offers a local version through gradio that can be run locally. You can navigate to the demo/msgpt/ directory and execute `bash run_msgpt.sh`.
+* Sep 4, 2023: Three demos, [demo_qwen](demo/demo_qwen_agent.ipynb), [demo_retrieval_agent](demo/demo_retrieval_agent.ipynb) and [demo_register_tool](demo/demo_register_new_tool.ipynb), have been added, along with detailed tutorials provided.
+* Sep 2, 2023: The [preprint paper](https://arxiv.org/abs/2309.00986) associated with this project was published.
+* Aug 22, 2023: Support accessing various AI model APIs using ModelScope tokens.
+* Aug 7, 2023: The initial version of the modelscope-agent repository was released.
 
-**实现内容**:
-```python
-def get_node_relations(self, full_name):
-    """获取某节点所有相关关系（出边+入边），返回结构化信息"""
-    relations = {
-        'incoming_calls': [],  # 谁调用了我
-        'outgoing_calls': [],  # 我调用了谁
-        'inherits_from': [],   # 我继承谁
-        'inherited_by': [],    # 谁继承我
-    }
-    # 使用Cypher查询获取各种关系
-    # 谁调用我（入CALL边）
-    cypher = (
-        "MATCH (src)-[r:CALL]->(dst {full_name: $full_name}) RETURN src.full_name AS caller"
-    )
-    rs = self.execute_query(cypher, full_name=full_name)
-    relations['incoming_calls'] = [r['caller'] for r in rs if r.get('caller')]
-    
-    # 我调用了谁（出CALL边）
-    cypher = (
-        "MATCH (src {full_name: $full_name})-[r:CALL]->(dst) RETURN dst.full_name AS callee"
-    )
-    rs = self.execute_query(cypher, full_name=full_name)
-    relations['outgoing_calls'] = [r['callee'] for r in rs if r.get('callee')]
-    
-    # 我继承谁（出INHERITS边）
-    cypher = (
-        "MATCH (src {full_name: $full_name})-[r:INHERITS]->(dst) RETURN dst.full_name AS base"
-    )
-    rs = self.execute_query(cypher, full_name=full_name)
-    relations['inherits_from'] = [r['base'] for r in rs if r.get('base')]
-    
-    # 谁继承我（入INHERITS边）
-    cypher = (
-        "MATCH (src)-[r:INHERITS]->(dst {full_name: $full_name}) RETURN src.full_name AS subclass"
-    )
-    rs = self.execute_query(cypher, full_name=full_name)
-    relations['inherited_by'] = [r['subclass'] for r in rs if r.get('subclass')]
-    
-    return relations
+
+## Installation
+
+clone repo and install dependency：
+```shell
+git clone https://github.com/modelscope/modelscope-agent.git
+cd modelscope-agent && pip install -r requirements.txt
 ```
 
-**作用**: 
-- 从Neo4j图数据库中查询指定节点的所有邻接关系
-- 返回结构化的关系字典，包含调用关系和继承关系
-- 为描述生成器提供结构上下文信息
+### ModelScope notebook【recommended】
 
-**Cypher查询说明**:
-- `incoming_calls`: 查询所有指向当前节点的CALL关系（谁调用了我）
-- `outgoing_calls`: 查询所有从当前节点发出的CALL关系（我调用了谁）
-- `inherits_from`: 查询当前节点的父类（继承关系）
-- `inherited_by`: 查询继承当前节点的子类
+The ModelScope Notebook offers a free-tier that allows ModelScope user to run the FaceChain application with minimum setup, refer to [ModelScope Notebook](https://modelscope.cn/my/mynotebook/preset)
 
----
+```shell
+# Step1: 我的notebook -> PAI-DSW -> GPU环境
 
-### 2. `modelscope_agent/environment/graph_database/indexer/my_client.py` - 集成关系信息到描述生成流程
+# Step2: Download the [demo file](https://github.com/modelscope/modelscope-agent/blob/master/demo/demo_qwen_agent.ipynb) and upload it to the GPU.
 
-**修改位置**: `_generate_method_description` 方法
-
-**实现内容**:
-```python
-def _generate_method_description(self, full_name: str, data: dict) -> str:
-    """
-    为METHOD节点生成描述
-    
-    Args:
-        full_name: 方法的完整名称
-        data: 方法的数据字典
-        
-    Returns:
-        方法的描述文本
-    """
-    try:
-        # 获取方法代码
-        method_code = data.get('code', '')
-        if not method_code:
-            print(f"警告: {full_name} 没有代码内容")
-            return ""
-        
-        # 获取方法名称和类名
-        method_name = data.get('name', full_name.split('.')[-1])
-        class_name = data.get('class', '')
-        file_path = data.get('file_path', '')
-        
-        # 新增：获取方法节点所有邻接关系
-        relations = self.graphDB.get_node_relations(full_name)
-        print(f"正在为 {full_name} 生成描述...")
-        print(f"  方法名: {method_name}")
-        print(f"  类名: {class_name}")
-        print(f"  文件路径: {file_path}")
-        print(f"  代码长度: {len(method_code)} 字符")
-        print(f"  关系信息: {relations}")
-        
-        # 使用描述生成器生成描述
-        description_generator = get_description_generator()
-        description = description_generator.generate_method_description(
-            method_code=method_code,
-            method_name=method_name,
-            class_name=class_name,
-            file_path=file_path,
-            relations=relations  # 新增参数
-        )
-        
-        print(f"生成描述: {description}")
-        return description
-        
-    except Exception as e:
-        print(f"生成方法描述失败 {full_name}: {e}")
-        import traceback
-        traceback.print_exc()
-        return f"描述生成失败: {str(e)}"
+# Step3:  Execute the demo notebook in order.
 ```
 
-**作用**:
-- 在生成描述前，自动从图数据库获取节点的所有关系信息
-- 将关系信息传递给描述生成器，使其能够生成包含结构上下文的描述
 
-**关键点**:
-- 调用时机：在 `recordSymbolKind` 方法中，当处理METHOD/FUNCTION节点时调用
-- 数据流：图数据库 → `get_node_relations` → `_generate_method_description` → 描述生成器
+## Quickstart
 
----
+The agent incorporates an LLM along with task-specific tools, and uses the LLM to determine which tool or tools to invoke in order to complete the user's tasks.
 
-### 3. `modelscope_agent/environment/graph_database/indexer/method_description_generator.py` - 支持关系信息融合
+To start, all you need to do is initialize an `RolePlay` object with corresponding tasks
 
-#### 修改1: `generate_method_description` 方法签名
+- This sample code uses the qwen-max model, drawing tools and weather forecast tools.
+     - Using the qwen-max model requires replacing YOUR_DASHSCOPE_API_KEY in the example with your API-KEY for the code to run properly. YOUR_DASHSCOPE_API_KEY can be obtained [here](https://help.aliyun.com/zh/dashscope/developer-reference/activate-dashscope-and-create-an-api-key). The drawing tool also calls DASHSCOPE API (wanx), so no additional configuration is required.
+     - When using the weather forecast tool, you need to replace YOUR_AMAP_TOKEN in the example with your AMAP weather API-KEY so that the code can run normally. YOUR_AMAP_TOKEN is available [here](https://lbs.amap.com/api/javascript-api-v2/guide/services/weather).
 
-**实现内容**:
-```python
-def generate_method_description(self, method_code: str, method_name: str, 
-                                class_name: str = None, file_path: str = None, 
-                                relations: dict = None) -> str:
-    """
-    为方法生成描述
-    
-    Args:
-        method_code: 方法的完整代码
-        method_name: 方法名称
-        class_name: 所属类名（可选）
-        file_path: 文件路径（可选）
-        relations: 节点关系信息（可选）
-        
-    Returns:
-        方法的描述文本
-    """
-    # ... 实现代码
+
+```Python
+# 配置环境变量；如果您已经提前将api-key提前配置到您的运行环境中，可以省略这个步骤
+import os
+os.environ['DASHSCOPE_API_KEY']=YOUR_DASHSCOPE_API_KEY
+os.environ['AMAP_TOKEN']=YOUR_AMAP_TOKEN
+
+# 选用RolePlay 配置agent
+from modelscope_agent.agents.role_play import RolePlay  # NOQA
+
+role_template = '你扮演一个天气预报助手，你需要查询相应地区的天气，并调用给你的画图工具绘制一张城市的图。'
+
+llm_config = {'model': 'qwen-max', 'model_server': 'dashscope'}
+
+# input tool name
+function_list = ['amap_weather', 'image_gen']
+
+bot = RolePlay(
+    function_list=function_list, llm=llm_config, instruction=role_template)
+
+response = bot.run('朝阳区天气怎样？')
+
+text = ''
+for chunk in response:
+    text += chunk
 ```
 
-**作用**: 添加 `relations` 参数，支持接收结构关系信息
+Result
+- Terminal runs
+```shell
+# 第一次调用llm的输出
+Action: amap_weather
+Action Input: {"location": "朝阳区"}
 
-#### 修改2: `_build_prompt` 方法 - 融合关系信息到提示词
+# 第二次调用llm的输出
+目前，朝阳区的天气状况为阴天，气温为1度。
 
-**实现内容**:
-```python
-def _build_prompt(self, method_code: str, method_name: str, 
-                 class_name: str = None, file_path: str = None, 
-                 relations: dict = None) -> str:
-    """构建大模型提示词"""
-    context_info = ""
-    if class_name:
-        context_info += f"所属类: {class_name}\n"
-    if file_path:
-        context_info += f"文件路径: {file_path}\n"
-    
-    # 新增关系说明
-    if relations:
-        in_calls = relations.get('incoming_calls', [])
-        out_calls = relations.get('outgoing_calls', [])
-        inherited = relations.get('inherits_from', [])
-        subed = relations.get('inherited_by', [])
-        
-        if in_calls:
-            context_info += f"被以下方法调用: {', '.join(in_calls)[:200]}\n"
-        if out_calls:
-            context_info += f"调用了以下方法: {', '.join(out_calls)[:200]}\n"
-        if inherited:
-            context_info += f"继承自: {', '.join(inherited)[:100]}\n"
-        if subed:
-            context_info += f"被以下类继承: {', '.join(subed)[:100]}\n"
-    
-    # 更新prompt，要求分析关系
-    prompt = f"""请分析以下Python方法及其结构关系，用简洁的中文描述它的作用、功能及关键关系：
+Action: image_gen
+Action Input: {"text": "朝阳区城市风光", "resolution": "1024*1024"}
 
-{context_info}方法名: {method_name}
-方法代码:
-```python
-{method_code}
+# 第三次调用llm的输出
+目前，朝阳区的天气状况为阴天，气温为1度。同时，我已为你生成了一张朝阳区的城市风光图，如下所示：
+
+![](https://dashscope-result-sh.oss-cn-shanghai.aliyuncs.com/1d/45/20240204/3ab595ad/96d55ca6-6550-4514-9013-afe0f917c7ac-1.jpg?Expires=1707123521&OSSAccessKeyId=LTAI5tQZd8AEcZX6KZV4G8qL&Signature=RsJRt7zsv2y4kg7D9QtQHuVkXZY%3D)
 ```
 
-请用一句话概括该方法的主要作用，并指出其与其它方法/类的重要关系（若有）：
+## modules
+### Agent
 
-描述："""
-    
-    return prompt
-```
+An `Agent` object consists of the following components:
 
-**作用**:
-- 将关系信息格式化为自然语言，添加到提示词的上下文部分
-- 更新prompt模板，要求LLM分析并描述结构关系
-- 限制关系列表长度，避免prompt过长
+- `LLM`: A large language model that is responsible to process your inputs and decide calling tools.
+- `function_list`: A list consists of available tools for agents.
 
-**关键设计决策**:
-- 字符串截断：`[:200]` 和 `[:100]` 限制关系列表长度，避免超出token限制
-- 条件渲染：只有当关系存在时才添加到context_info，保持提示词简洁
+Currently, configuration of `Agent` may contain following arguments:
+- `llm`: The llm config of this agent
+    - When Dict: set the config of llm as {'model': '', 'api_key': '', 'model_server': ''}
+    - When BaseChatModel: llm is sent by another agent
+- `function_list`: A list of tools
+    - When str: tool names
+    - When Dict: tool cfg
+- `storage_path`: If not specified otherwise, all data will be stored here in KV pairs by memory
+- `instruction`: the system instruction of this agent
+- `name`: the name of agent
+- `description`: the description of agent, which is used for multi_agent
+- `kwargs`: other potential parameters
 
----
-
-## 数据流程
-
-```
-图数据库构建流程:
-┌─────────────────┐
-│ recordSymbolKind│  创建METHOD节点
-│ (my_client.py)  │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────────────┐
-│ _generate_method_       │  1. 提取方法代码、名称等
-│ description()           │  2. 调用 graphDB.get_node_relations()
-│ (my_client.py)          │  3. 传递关系信息给描述生成器
-└────────┬────────────────┘
-         │
-         ▼
-┌─────────────────────────┐
-│ get_node_relations()    │  执行Cypher查询，获取:
-│ (my_graph_db.py)        │  - incoming_calls
-│                         │  - outgoing_calls
-│                         │  - inherits_from
-│                         │  - inherited_by
-└────────┬────────────────┘
-         │
-         ▼
-┌─────────────────────────┐
-│ generate_method_        │  1. 接收relations参数
-│ description()           │  2. 调用 _build_prompt()
-│ (method_description_   │  3. 调用 _call_llm()
-│ generator.py)           │  4. 返回生成的描述
-└────────┬────────────────┘
-         │
-         ▼
-┌─────────────────────────┐
-│ _build_prompt()         │  将关系信息格式化为prompt
-│ (method_description_    │  示例输出:
-│ generator.py)           │  "被以下方法调用: func1, func2
-│                         │   调用了以下方法: math.log, utils.helper"
-└────────┬────────────────┘
-         │
-         ▼
-┌─────────────────────────┐
-│ LLM API                 │  生成包含关系信息的描述
-│ (大模型)                │  示例输出:
-│                         │  "该方法用于计算数值，被module.foo
-│                         │   调用，内部调用math.log进行对数运算"
-└─────────────────────────┘
-```
-
----
-
-## 扩展指南
-
-### 1. 添加新的关系类型
-
-#### 步骤1: 扩展 `get_node_relations` 方法
-
-在 `modelscope_agent/environment/graph_database/indexer/my_graph_db.py` 中添加新的关系查询：
+`Agent`, as a base class, cannot be directly initialized and called. Agent subclasses need to inherit it. They must implement function `_run`, which mainly includes three parts: generation of messages/propmt, calling of llm(s), and tool calling based on the results of llm. We provide an implement of these components in `RolePlay` for users, and you can also custom your components according to your requirement.
 
 ```python
-def get_node_relations(self, full_name):
-    relations = {
-        # ... 现有关系
-        'new_relation_type': [],  # 新增关系类型
-    }
-    
-    # 添加Cypher查询
-    cypher = (
-        "MATCH (src)-[r:NEW_RELATION_TYPE]->(dst {full_name: $full_name}) "
-        "RETURN src.full_name AS related_node"
-    )
-    rs = self.execute_query(cypher, full_name=full_name)
-    relations['new_relation_type'] = [r['related_node'] for r in rs if r.get('related_node')]
-    
-    return relations
+from modelscope_agent import Agent
+class YourCustomAgent(Agent):
+    def _run(self, user_request, **kwargs):
+        # Custom your workflow
 ```
 
-**支持的关系类型**:
-- `CALL`: 方法调用关系
-- `INHERITS`: 继承关系
-- `USES`: 使用关系（变量使用）
-- `CONTAINS`: 包含关系（模块包含类/函数）
-- 自定义关系类型...
 
-#### 步骤2: 更新 `_build_prompt` 方法
+### LLM
+LLM is core module of agent, which ensures the quality of interaction results.
 
-在 `modelscope_agent/environment/graph_database/indexer/method_description_generator.py` 中添加新关系的格式化逻辑：
+Currently, configuration of `` may contain following arguments:
+- `model`: The specific model name will be passed directly to the model service provider.
+- `model_server`: provider of model services.
 
+`BaseChatModel`, as a base class of llm, cannot be directly initialized and called. The subclasses need to inherit it. They must implement function `_chat_stream` and `_chat_no_stream`, which correspond to streaming output and non-streaming output respectively.
+Optionally implement `chat_with_functions` and `chat_with_raw_prompt` for function calling and text completion.
+
+Currently we provide the implementation of three model service providers: dashscope (for qwen series models), zhipu (for glm series models) and openai (for all openai api format models). You can directly use the models supported by the above service providers, or you can customize your llm.
+
+For more information please refer to `docs/modules/llm.md`
+
+### `Tool`
+
+We provide several multi-domain tools that can be configured and used in the agent.
+
+You can also customize your tools with set the tool's name, description, and parameters based on a predefined pattern by inheriting the base tool. Depending on your needs, call() can be implemented.
+An example of a custom tool is provided in [demo_register_new_tool](/demo/demo_register_new_tool.ipynb)
+
+You can pass the tool name or configuration you want to use to the agent.
 ```python
-def _build_prompt(self, ..., relations: dict = None) -> str:
-    # ... 现有代码
-    
-    if relations:
-        # 添加新关系的处理
-        new_relations = relations.get('new_relation_type', [])
-        if new_relations:
-            context_info += f"新关系说明: {', '.join(new_relations)[:100]}\n"
-    
-    # ... 其余代码
+# by tool name
+function_list = ['amap_weather', 'image_gen']
+bot = RolePlay(function_list=function_list, ...)
+
+# by tool configuration
+from langchain.tools import ShellTool
+function_list = [{'terminal':ShellTool()}]
+bot = RolePlay(function_list=function_list, ...)
+
+# by mixture
+function_list = ['amap_weather', {'terminal':ShellTool()}]
+bot = RolePlay(function_list=function_list, ...)
 ```
 
----
+#### Built-in tools
+- `image_gen`: [Wanx Image Generation](https://help.aliyun.com/zh/dashscope/developer-reference/tongyi-wanxiang). [DASHSCOPE_API_KEY](https://help.aliyun.com/zh/dashscope/developer-reference/activate-dashscope-and-create-an-api-key) needs to be configured in the environment variable.
+- `code_interpreter`: [Code Interpreter](https://jupyter-client.readthedocs.io/en/5.2.2/api/client.html)
+- `web_browser`: [Web Browsing](https://python.langchain.com/docs/use_cases/web_scraping)
+- `amap_weather`: [AMAP Weather](https://lbs.amap.com/api/javascript-api-v2/guide/services/weather). AMAP_TOKEN needs to be configured in the environment variable.
+- `wordart_texture_generation`: [Word art texture generation](https://help.aliyun.com/zh/dashscope/developer-reference/wordart). [DASHSCOPE_API_KEY](https://help.aliyun.com/zh/dashscope/developer-reference/activate-dashscope-and-create-an-api-key) needs to be configured in the environment variable.
+- `web_search`: [Web Searching](https://learn.microsoft.com/en-us/bing/search-apis/bing-web-search/overview). []
+- `qwen_vl`: [Qwen-VL image recognition](https://help.aliyun.com/zh/dashscope/developer-reference/tongyi-qianwen-vl-plus-api). [DASHSCOPE_API_KEY](https://help.aliyun.com/zh/dashscope/developer-reference/activate-dashscope-and-create-an-api-key) needs to be configured in the environment variable.
+- `style_repaint`: [Character style redrawn](https://help.aliyun.com/zh/dashscope/developer-reference/tongyi-wanxiang-style-repaint). [DASHSCOPE_API_KEY](https://help.aliyun.com/zh/dashscope/developer-reference/activate-dashscope-and-create-an-api-key) needs to be configured in the environment variable.
+- `image_enhancement`: [Chasing shadow-magnifying glass](https://github.com/dreamoving/Phantom). [DASHSCOPE_API_KEY](https://help.aliyun.com/zh/dashscope/developer-reference/activate-dashscope-and-create-an-api-key) needs to be configured in the environment variable.
+- `text-address`: [Geocoding](https://www.modelscope.cn/models/iic/mgeo_geographic_elements_tagging_chinese_base/summary). [MODELSCOPE_API_TOKEN](https://www.modelscope.cn/my/myaccesstoken) needs to be configured in the environment variable.
+- `speech-generation`: [Speech generation](https://www.modelscope.cn/models/iic/speech_sambert-hifigan_tts_zh-cn_16k/summary). [MODELSCOPE_API_TOKEN](https://www.modelscope.cn/my/myaccesstoken) needs to be configured in the environment variable.
+- `video-generation`: [Video generation](https://www.modelscope.cn/models/iic/text-to-video-synthesis/summary). [MODELSCOPE_API_TOKEN](https://www.modelscope.cn/my/myaccesstoken) needs to be configured in the environment variable.
 
-### 2. 自定义描述风格
+### Multi-agent
 
-#### 修改提示词模板
+Please refer the multi-agent [readme](modelscope_agent/multi_agents_utils/README.md).
 
-在 `_build_prompt` 方法中修改prompt模板：
 
-```python
-prompt = f"""请用以下风格描述方法：
-1. 使用专业术语
-2. 突出方法的业务价值
-3. 详细说明参数和返回值
+## Related Tutorials
 
-{context_info}
-方法名: {method_name}
-方法代码:
-```python
-{method_code}
+If you would like to learn more about the practical details of Agent, you can refer to our articles and video tutorials:
+
+* [Article Tutorial](https://mp.weixin.qq.com/s/L3GiV2QHeybhVZSg_g_JRw)
+* [Video Tutorial](https://b23.tv/AGIzmHM)
+
+## Share Your Agent
+
+We appreciate your enthusiasm in participating in our open-source ModelScope-Agent project. If you encounter any issues, please feel free to report them to us. If you have built a new Agent demo and are ready to share your work with us, please create a pull request at any time! If you need any further assistance, please contact us via email at [contact@modelscope.cn](mailto:contact@modelscope.cn) or [communication group](https://modelscope.cn/docs/%E8%81%94%E7%B3%BB%E6%88%91%E4%BB%AC)!
+
+### Facechain Agent
+Facechain is an open-source project for generating personalized portraits in various styles using facial images uploaded by users. By integrating the capabilities of Facechain into the modelscope-agent framework, we have greatly simplified the usage process. The generation of personalized portraits can now be done through dialogue with the Facechain Agent.
+
+FaceChainAgent Studio Application Link: https://modelscope.cn/studios/CVstudio/facechain_agent_studio/summary
+
+You can run it directly in a notebook/Colab/local environment: https://www.modelscope.cn/my/mynotebook
+
+```
+! git clone -b feat/facechain_agent https://github.com/modelscope/modelscope-agent.git
+
+! cd modelscope-agent && ! pip install -r requirements.txt
+! cd modelscope-agent/demo/facechain_agent/demo/facechain_agent && ! pip install -r requirements.txt
+! pip install http://dashscope-cn-beijing.oss-cn-beijing.aliyuncs.com/zhicheng/modelscope_agent-0.1.0-py3-none-any.whl
+! PYTHONPATH=/mnt/workspace/modelscope-agent/demo/facechain_agent && cd modelscope-agent/demo/facechain_agent/demo/facechain_agent && python app_v1.0.py
 ```
 
-描述:"""
-```
+## License
 
-#### 支持多语言描述
+This project is licensed under the [Apache License (Version 2.0)](https://github.com/modelscope/modelscope/blob/master/LICENSE).
 
-```python
-def _build_prompt(self, ..., lang: str = 'zh') -> str:
-    if lang == 'en':
-        prompt = f"""Analyze the following Python method..."""
-    elif lang == 'zh':
-        prompt = f"""请分析以下Python方法..."""
-    # ...
-```
+## Star History
 
----
-
-### 3. 支持其他节点类型
-
-#### 扩展描述生成器
-
-创建通用的描述生成接口：
-
-```python
-def generate_node_description(self, node_type: str, node_code: str, 
-                              node_name: str, relations: dict = None) -> str:
-    """
-    通用的节点描述生成器
-    
-    Args:
-        node_type: 节点类型 (METHOD, CLASS, FUNCTION等)
-        node_code: 节点代码
-        node_name: 节点名称
-        relations: 关系信息
-    """
-    if node_type == 'METHOD':
-        return self.generate_method_description(...)
-    elif node_type == 'CLASS':
-        return self._generate_class_description(...)
-    elif node_type == 'FUNCTION':
-        return self.generate_method_description(...)  # 复用METHOD逻辑
-    # ...
-```
-
-#### 在 my_client.py 中集成
-
-```python
-def _generate_node_description(self, full_name: str, kind: str, data: dict) -> str:
-    """为任意类型节点生成描述"""
-    description_generator = get_description_generator()
-    
-    if kind in ['METHOD', 'FUNCTION']:
-        relations = self.graphDB.get_node_relations(full_name)
-        return description_generator.generate_node_description(
-            node_type=kind,
-            node_code=data.get('code', ''),
-            node_name=data.get('name', ''),
-            relations=relations
-        )
-    elif kind == 'CLASS':
-        # 类节点的特殊处理
-        # ...
-```
-
----
-
-### 4. 优化性能
-
-#### 批量查询关系
-
-如果一次需要为多个节点生成描述，可以批量查询关系：
-
-```python
-def get_nodes_relations(self, full_names: list) -> dict:
-    """批量获取多个节点的关系"""
-    # 使用单个Cypher查询获取所有关系
-    cypher = """
-        MATCH (src)-[r:CALL]->(dst)
-        WHERE dst.full_name IN $full_names
-        RETURN dst.full_name AS node, src.full_name AS caller
-    """
-    rs = self.execute_query(cypher, full_names=full_names)
-    
-    # 聚合结果
-    relations_dict = {name: {'incoming_calls': []} for name in full_names}
-    for r in rs:
-        relations_dict[r['node']]['incoming_calls'].append(r['caller'])
-    
-    return relations_dict
-```
-
-#### 关系缓存
-
-```python
-class MethodDescriptionGenerator:
-    def __init__(self, ...):
-        self.relations_cache = {}  # 缓存关系信息
-    
-    def get_cached_relations(self, full_name: str, graph_db):
-        """获取缓存的关系信息"""
-        if full_name not in self.relations_cache:
-            self.relations_cache[full_name] = graph_db.get_node_relations(full_name)
-        return self.relations_cache[full_name]
-```
-
----
-
-### 5. 自定义关系分析深度
-
-#### 支持多跳关系
-
-```python
-def get_node_relations(self, full_name, depth: int = 1):
-    """
-    获取节点的关系，支持多跳查询
-    
-    Args:
-        full_name: 节点名称
-        depth: 关系深度（1=直接关系，2=二级关系等）
-    """
-    if depth == 1:
-        # 现有逻辑
-        return self._get_direct_relations(full_name)
-    elif depth == 2:
-        # 二级关系
-        cypher = """
-            MATCH (src)-[r1:CALL]->(middle)-[r2:CALL]->(dst {full_name: $full_name})
-            RETURN src.full_name AS caller, middle.full_name AS intermediate
-        """
-        # ...
-```
-
----
-
-### 6. 关系权重和重要性排序
-
-```python
-def get_node_relations(self, full_name):
-    relations = {
-        'incoming_calls': [],
-        'outgoing_calls': [],
-        # ...
-    }
-    
-    # 查询关系并添加权重
-    cypher = """
-        MATCH (src)-[r:CALL]->(dst {full_name: $full_name})
-        RETURN src.full_name AS caller, count(r) AS call_count
-        ORDER BY call_count DESC
-        LIMIT 10
-    """
-    # 只返回调用频率最高的10个
-```
-
----
-
-## 测试和验证
-
-### 验证关系查询
-
-```python
-# 测试 get_node_relations
-relations = graph_db.get_node_relations("module.ClassName.method_name")
-print(relations)
-# 预期输出:
-# {
-#     'incoming_calls': ['module.other_func', 'module.another_func'],
-#     'outgoing_calls': ['math.log', 'utils.helper'],
-#     'inherits_from': ['BaseClass'],
-#     'inherited_by': []
-# }
-```
-
-### 验证描述生成
-
-```python
-from modelscope_agent.environment.graph_database.indexer.method_description_generator import get_description_generator
-
-generator = get_description_generator()
-description = generator.generate_method_description(
-    method_code="def calculate(x, y): return x + y",
-    method_name="calculate",
-    relations={
-        'incoming_calls': ['main', 'processor'],
-        'outgoing_calls': ['math.sqrt']
-    }
-)
-print(description)
-# 预期输出包含关系信息
-```
-
----
-
-## 常见问题
-
-### Q1: 关系查询性能慢怎么办？
-**A**: 考虑：
-- 在Neo4j中为 `full_name` 创建索引
-- 使用批量查询而不是逐个查询
-- 限制关系数量（如只查询最重要的前N个）
-
-### Q2: 如何过滤不重要关系？
-**A**: 在 `get_node_relations` 中添加过滤逻辑：
-```python
-# 只返回调用次数超过阈值的调用者
-if call_count >= threshold:
-    relations['incoming_calls'].append(caller)
-```
-
-### Q3: 描述太长怎么办？
-**A**: 
-- 在 `_build_prompt` 中进一步限制关系列表长度
-- 只显示最重要的关系（如调用频率最高的）
-- 调整LLM的 `max_tokens` 参数
-
----
-
-## 总结
-
-通过以上修改，我们实现了：
-1. ✅ 从图数据库查询节点关系的能力
-2. ✅ 将关系信息传递给描述生成器
-3. ✅ 在LLM提示词中融合关系信息
-4. ✅ 生成包含结构上下文的智能描述
-
-**核心改进**: 描述生成不再孤立分析单个方法，而是结合其在代码图谱中的位置和关系，提供更全面的理解。
-
----
-
-## 相关文件
-
-- `modelscope_agent/environment/graph_database/indexer/method_description_generator.py`: 核心描述生成逻辑
-- `modelscope_agent/environment/graph_database/indexer/my_client.py`: 客户端集成代码
-- `modelscope_agent/environment/graph_database/indexer/my_graph_db.py`: 图数据库操作和关系查询
-
----
-
-## 更新日志
-
-- **2024-XX-XX**: 初始实现，支持基本的方法描述生成
-- **2024-XX-XX**: 添加结构关系分析功能，融合调用和继承关系到描述中
+[![Star History Chart](https://api.star-history.com/svg?repos=modelscope/modelscope-agent&type=Date)](https://star-history.com/#modelscope/modelscope-agent&Date)

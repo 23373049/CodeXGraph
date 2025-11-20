@@ -1,0 +1,36 @@
+### Text Queries:
+${text_queries}
+
+### Task Instructions:
+Break each text query into smaller, concrete lookups (e.g., locate a module, then its functions) and convert them into Cypher statements that the graph database understands.
+
+Your response must follow:
+```
+[start_of_cypher_queries]
+### Query 1
+**decomposed text query**:
+```cypher
+<cypher_query>
+```
+
+### Query 2
+**decomposed text query**:
+```cypher
+<cypher_query>
+```
+...
+### Query n
+**decomposed text query**:
+```cypher
+<cypher_query>
+```
+[end_of_cypher_queries]
+```
+
+Guidelines:
+1. Prefer explicit module/file names (e.g., `drivers/uart/uart.c`) and include headers when relevant (`drivers/uart/uart.h`).
+2. Use nodes `MODULE`, `FUNCTION`, `STRUCT`, `FIELD`, `MACRO`, etc., and relationships like `CONTAINS`, `DECLARES`, `DEFINES`, `USES`, `INHERITS`.
+3. When locating symbols, attempt precise matching first (`WHERE m.name = 'foo/bar.c'`), then provide a fallback fuzzy match (`=~ '.*foo/bar.c'`) if necessary.
+4. Wrap optional relationships with `OPTIONAL MATCH` to avoid query failures when a symbol is missing.
+5. Highlight error handling or ambiguity in the decomposed text query description so the main assistant can interpret incomplete results correctly.
+

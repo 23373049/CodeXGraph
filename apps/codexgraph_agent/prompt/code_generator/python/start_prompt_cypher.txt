@@ -38,31 +38,13 @@ MATCH (mod:MODULE {name: '<module name>'})
 MATCH (mod)-[:CONTAINS]->(cls:CLASS {name: '<class name>'})
 MATCH (cls)-[:HAS_METHOD]->(method:METHOD)
 MATCH (cls)-[:HAS_FIELD]->(field:FIELD)
-RETURN method.name, method.description, field.code
+RETURN method.name, field.code
 ```
 2. Query all fields under a Class:
 ```cypher
 MATCH (c:CLASS {name: 'YourClassName'})-[:HAS_FIELD]->(f) RETURN f.name, f.code
 ```
-3. Query the code of a specific method:
+4. Query the code of a specific method:
 ```cypher
-MATCH (m:METHOD {name: 'yourMethodName'}) RETURN m.code, m.description
-```
-4. Search methods by description (fuzzy matching):
-```cypher
-MATCH (m:METHOD) 
-WHERE m.description =~ '.*<keyword>.*' 
-RETURN m.name, m.description, m.code
-```
-5. Search functions by description (fuzzy matching):
-```cypher
-MATCH (f:FUNCTION) 
-WHERE f.description =~ '.*<keyword>.*' 
-RETURN f.name, f.description, f.code
-```
-6. Search both methods and functions by description:
-```cypher
-MATCH (n) 
-WHERE (n:METHOD OR n:FUNCTION) AND n.description =~ '.*<keyword>.*' 
-RETURN n.name, n.description, n.code, labels(n) as node_type
+MATCH (m:METHOD {name: 'yourMethodName'}) RETURN m.code
 ```

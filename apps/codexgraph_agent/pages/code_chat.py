@@ -1,6 +1,18 @@
 import os
+import sys
 from datetime import datetime
 from pathlib import Path
+
+# Ensure the repo root is on sys.path so imports like `apps.codexgraph_agent...`
+# work regardless of the current working directory when running Streamlit.
+try:
+    repo_root = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), '..', '..', '..'))
+    if repo_root not in sys.path:
+        sys.path.insert(0, repo_root)
+except Exception:
+    # Best-effort only; if this fails, normal import errors will surface.
+    pass
 
 import json
 import streamlit as st
@@ -40,6 +52,7 @@ class CodeChatPage(PageBase):
         schema_path = str(
             Path(st.session_state.shared['setting']['prompt_path']).joinpath(
                 'graph_database'))
+        language = st.session_state.shared['setting'].get('language', 'python')
 
         try:
             agent = CodexGraphAgentChat(
@@ -47,6 +60,7 @@ class CodeChatPage(PageBase):
                 prompt_path=prompt_path,
                 schema_path=schema_path,
                 task_id=st.session_state.shared['setting']['project_id'],
+                language=language,
                 graph_db=graph_db,
                 max_iterations=max_iterations,
                 message_callback=self.create_update_message())
@@ -97,8 +111,6 @@ class CodeChatPage(PageBase):
             print(
                 f'The e is {e}, while the traceback is {traceback.format_exc()}'
             )
-            # 设置默认错误消息
-            answer = f"Sorry, I encountered an error while processing your request: {str(e)}"
         # answer = agent_test_run(user_input, '', self.update_message)
 
         end_time = datetime.now()
