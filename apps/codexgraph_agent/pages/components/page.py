@@ -21,7 +21,7 @@ def get_llm_config(llm_name):
 
         llm_config = {
             'model': 'deepseek-coder',
-            'api_base': 'https://api.deepseek.com',
+            'api_base': 'https://jeniya.cn/v1',
             'model_server': 'openai'
         }
 

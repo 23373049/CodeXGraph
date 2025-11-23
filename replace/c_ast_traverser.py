@@ -170,6 +170,109 @@ def extract_function_name_from_call(function_node: Node):
     return None
 
 
+def extract_function_return_type(function_node: Node):
+    """
+    从函数定义或声明节点中提取返回类型。
+    函数定义的结构：type declarator body
+    函数声明的结构：type declarator;
+    """
+    if not function_node:
+        return None
+    
+    # 支持 function_definition 和 declaration 两种节点类型
+    if function_node.type not in ['function_definition', 'declaration']:
+        return None
+    
+    type_node = function_node.child_by_field_name('type')
+    if not type_node:
+        return 'void'  # 默认返回类型
+    
+    # 提取类型文本
+    return_type_text = type_node.text.decode('utf8', errors='ignore').strip()
+    return return_type_text if return_type_text else 'void'
+
+
+def extract_function_parameters(function_node: Node):
+    """
+    从函数定义节点中提取参数列表。
+    返回参数列表的字符串表示，格式如: "int a, char *b, void"
+    """
+    if not function_node:
+        return []
+    
+    # 获取 declarator
+    declarator = None
+    if function_node.type == 'function_definition':
+        declarator = function_node.child_by_field_name('declarator')
+    elif function_node.type == 'declaration':
+        declarator = function_node.child_by_field_name('declarator')
+    
+    if not declarator:
+        return []
+    
+    # 查找 function_declarator
+    def find_function_declarator(n, depth=0, max_depth=10):
+        """递归查找 function_declarator 节点"""
+        if depth > max_depth:
+            return None
+        if n.type == 'function_declarator':
+            return n
+        for child in n.children:
+            result = find_function_declarator(child, depth + 1, max_depth)
+            if result:
+                return result
+        return None
+    
+    func_declarator = find_function_declarator(declarator)
+    if not func_declarator:
+        return []
+    
+    # 获取 parameter_list
+    param_list = func_declarator.child_by_field_name('parameters')
+    if not param_list:
+        return []
+    
+    # 提取参数
+    parameters = []
+    for child in param_list.children:
+        if child.type == 'parameter_declaration':
+            # 提取参数类型和名称
+            param_type_node = child.child_by_field_name('type')
+            param_declarator = child.child_by_field_name('declarator')
+            
+            param_type = param_type_node.text.decode('utf8', errors='ignore').strip() if param_type_node else ''
+            
+            # 提取参数名
+            param_name = None
+            if param_declarator:
+                # 查找 identifier
+                def find_identifier_in_declarator(n, depth=0, max_depth=5):
+                    if depth > max_depth:
+                        return None
+                    if n.type == 'identifier':
+                        return n.text.decode('utf8', errors='ignore')
+                    for c in n.children:
+                        result = find_identifier_in_declarator(c, depth + 1, max_depth)
+                        if result:
+                            return result
+                    return None
+                
+                param_name = find_identifier_in_declarator(param_declarator)
+            
+            # 构建参数字符串
+            if param_name:
+                param_str = f"{param_type} {param_name}".strip()
+            else:
+                param_str = param_type if param_type else 'void'
+            
+            if param_str:
+                parameters.append(param_str)
+        elif child.type == 'variadic_parameter':
+            parameters.append('...')
+    
+    return parameters
+
+
 def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
     """
     解析 C 代码文件并使用 Tree-sitter 的 cursor 进行深度优先遍历，
@@ -264,6 +367,10 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                     # 直接记录整个函数定义（包含签名和函数体）到 code 属性
                     func_text = node.text.decode('utf8', errors='ignore')
                     
+                    # 提取返回类型和参数列表
+                    return_type = extract_function_return_type(node)
+                    parameters = extract_function_parameters(node)
+                    
                     name_hierarchy = NameHierarchy(func_name_short, client.current_context_name())
                     symbol_id = client.recordSymbol(
                         name_hierarchy,
@@ -275,11 +382,16 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                     full_name = client.symbolId_to_Name[symbol_id]
                     client.symbol_data[full_name]['code'] = func_text
                     
-                    # 标记为用户自定义函数并创建图节点
+                    # 标记为用户自定义函数并创建图节点，包含返回类型和参数列表
+                    attributes = {
+                        'category': FunctionCategory.USER_DEFINED.value,
+                        'return_type': return_type,
+                        'parameters': parameters
+                    }
                     client.recordSymbolKind(
                         symbol_id,
                         srctrl.SymbolKind.FUNCTION,
-                        {'category': FunctionCategory.USER_DEFINED.value}
+                        attributes
                     )
                     
                     # 将作用域范围记录为整个函数（含签名），确保 code 包含签名
@@ -353,6 +465,10 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                             # 提取完整的函数定义文本（包括返回类型、函数名、参数列表和函数体）
                             func_text = node.text.decode('utf8', errors='ignore')
                             
+                            # 提取返回类型和参数列表
+                            return_type = extract_function_return_type(node)
+                            parameters = extract_function_parameters(node)
+                            
                             name_hierarchy = NameHierarchy(func_name_short, client.current_context_name())
                             symbol_id = client.recordSymbol(name_hierarchy, node_path=file_path, tree_node=node, kind_hint=symbolKindToString(srctrl.SymbolKind.FUNCTION)) # <--- 修改
                             
@@ -377,7 +493,14 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                                 signature_text = func_text
                             
                             client.symbol_data[full_name]['signature'] = signature_text
-                            client.recordSymbolKind(symbol_id, srctrl.SymbolKind.FUNCTION) # <--- 修改
+                            
+                            # 创建属性字典，包含返回类型和参数列表
+                            attributes = {
+                                'signature': signature_text,
+                                'return_type': return_type,
+                                'parameters': parameters
+                            }
+                            client.recordSymbolKind(symbol_id, srctrl.SymbolKind.FUNCTION, attributes) # <--- 修改
                             
                             # 记录函数的作用域位置
                             client.recordSymbolScopeLocation(symbol_id, source_range)
@@ -393,6 +516,10 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                             # 提取完整的函数声明文本（包括返回类型、函数名、参数列表）
                             declaration_text = node.text.decode('utf8', errors='ignore')
                             
+                            # 提取返回类型和参数列表
+                            return_type = extract_function_return_type(node)
+                            parameters = extract_function_parameters(node)
+                            
                             name_hierarchy = NameHierarchy(func_name_short, client.current_context_name())
                             symbol_id = client.recordSymbol(name_hierarchy, node_path=file_path, tree_node=node, kind_hint=symbolKindToString(srctrl.SymbolKind.FUNCTION_DECLARATION)) # <--- 修改
                             
@@ -400,7 +527,12 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                             full_name = client.symbolId_to_Name[symbol_id]
                             client.symbol_data[full_name]['code'] = declaration_text
                             
-                            client.recordSymbolKind(symbol_id, srctrl.SymbolKind.FUNCTION_DECLARATION) # <--- 修改
+                            # 创建属性字典，包含返回类型和参数列表
+                            attributes = {
+                                'return_type': return_type,
+                                'parameters': parameters
+                            }
+                            client.recordSymbolKind(symbol_id, srctrl.SymbolKind.FUNCTION_DECLARATION, attributes) # <--- 修改
                             # print(f"  [CLIENT] Recorded FUNCTION_DECLARATION: {client.symbolId_to_Name[symbol_id]} in {file_name}")
                 
                 elif declarator.type == 'init_declarator' or declarator.type == 'declarator': # 变量声明 (可能带初始化)

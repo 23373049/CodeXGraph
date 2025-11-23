@@ -315,6 +315,11 @@ class AstVisitorClient:
                 node_parms['signature'] = self.symbol_data[full_name]['signature']
             if 'code' in self.symbol_data[full_name]:
                 node_parms['code'] = self.symbol_data[full_name]['code']
+            # Include return_type and parameters if they exist in data
+            if 'return_type' in data:
+                node_parms['return_type'] = data['return_type']
+            if 'parameters' in data:
+                node_parms['parameters'] = data['parameters']
 
             self.graphDB.add_node(label=kind, full_name=full_name, parms=node_parms)
 

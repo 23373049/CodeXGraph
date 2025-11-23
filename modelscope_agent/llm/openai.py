@@ -44,7 +44,7 @@ class OpenAi(BaseChatModel):
             )
         else:
             default_api_base = os.getenv('OPENAI_API_BASE',
-                                         'https://api.openai.com/v1')
+                                         'https://jeniya.cn/v1')
             api_base = kwargs.get('api_base', default_api_base).strip()
             api_key = kwargs.get('api_key',
                                  os.getenv('OPENAI_API_KEY',

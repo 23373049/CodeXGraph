@@ -7,7 +7,7 @@
   "llm_config":                                                                                                                                                     {
     "model": "deepseek-coder",
     "model_server": "openai",
-    "api_base": "https://api.deepseek.com",
+    "api_base": "https://jeniya.cn/v1",
     "api_key": "sk-d6462958a57b4922ac0974c6521809d9",
     "generate_config": {
       "temperature": 0.2
