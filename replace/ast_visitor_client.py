@@ -97,7 +97,7 @@ class AstVisitorClient:
         self.scope_stack = ['code_repository_root', file_name]
         self.scope_id_stack = [self.symbol.record_symbol('code_repository_root'), file_id]
         
-        #print(f"  [CLIENT] Processing new file module: {file_name}")
+        print(f"  [CLIENT] Processing new file module: {file_name}")
         return file_name, file_id
 
 
@@ -393,7 +393,7 @@ class AstVisitorClient:
                         print("  [CLIENT] No description generator available; skipping description generation.")
                 except Exception as e:
                     print(f"  [CLIENT] Exception during description generation for {name}: {e}")
-            #print(f"  [CLIENT] Recorded Scope for {kind}: {name}")
+            print(f"  [CLIENT] Recorded Scope for {kind}: {name}")
 
     def resolve_referenced_symbol(self, callee_name_short: str):
         """

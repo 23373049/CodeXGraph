@@ -16,26 +16,49 @@ from modelscope_agent.environment.graph_database.build import \
 
 
 def get_llm_config(llm_name):
-
+    """
+    获取LLM配置，包含API key和jeniya API base URL
+    """
+    # 从环境变量或session_state获取API key
+    api_key = os.getenv('OPENAI_API_KEY', '')
+    
+    # 如果环境变量中没有，尝试从streamlit session_state获取
+    if not api_key:
+        try:
+            api_key = st.session_state.get('OPENAI_API_KEY', '')
+        except Exception:
+            # 如果不在streamlit上下文中，忽略
+            pass
+    
+    # 如果还是没有，尝试从os.environ直接获取
+    if not api_key:
+        api_key = os.environ.get('OPENAI_API_KEY', '')
+    
+    # 打印调试信息
+    if api_key:
+        masked_key = f"{api_key[:10]}...{api_key[-4:]}" if len(api_key) > 14 else "***"
+        print(f"[get_llm_config] API Key found: {masked_key}")
+    else:
+        print("[get_llm_config] WARNING: API Key is empty!")
+    
     if llm_name == 'deepseek-coder':
-
         llm_config = {
             'model': 'deepseek-coder',
             'api_base': 'https://jeniya.cn/v1',
+            'api_key': api_key,
             'model_server': 'openai'
         }
-
     elif llm_name == 'gpt-4o':
-
         llm_config = {
             'model': 'gpt-4o-2024-05-13',
-            'api_base': 'https://api.openai.com/v1',
+            'api_base': 'https://jeniya.cn/v1',
+            'api_key': api_key,
             'model_server': 'openai'
         }
-
     else:
         return None
 
+    print(f"[get_llm_config] LLM Config for {llm_name}: model={llm_config['model']}, api_base={llm_config['api_base']}, has_api_key={bool(api_key)}")
     return llm_config
 
 
@@ -131,8 +154,22 @@ class PageBase(ABC):
 
         if not openai_api_key:
             self.warning(
-                'Enter your OpenAI API key in the sidebar. You can get a key at'
-                ' https://platform.openai.com/account/api-keys.')
+                'Enter your OpenAI/Deepseek API key in the sidebar. '
+                'For jeniya API, use your API key in the format: sk-...')
+        else:
+            # 验证API key格式
+            if not openai_api_key.startswith('sk-'):
+                self.warning(
+                    'API key should start with "sk-". '
+                    'Please check your API key format.')
+            # 显示配置信息（不进行实际连接测试，避免影响性能）
+            llm_name = st.session_state.shared['setting'].get('llm_model_name', 'deepseek-coder')
+            llm_config = get_llm_config(llm_name)
+            if llm_config:
+                masked_key = f'{openai_api_key[:10]}...{openai_api_key[-4:]}' if len(openai_api_key) > 14 else '***'
+                self.success(
+                    f'API configured: {llm_name} → {llm_config.get("api_base", "N/A")}\n'
+                    f'API Key: {masked_key}')
 
         self.body()
 

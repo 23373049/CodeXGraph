@@ -43,6 +43,13 @@ class CodeDebuggerPage(PageBase):
         language = st.session_state.shared['setting'].get('language', 'python')
 
         try:
+            # 打印调试信息
+            print(f"[DEBUG] LLM Config: {llm_config}")
+            print(f"[DEBUG] API Key present: {'api_key' in llm_config if llm_config else False}")
+            if llm_config and 'api_key' in llm_config:
+                masked_key = f"{llm_config['api_key'][:10]}...{llm_config['api_key'][-4:]}" if len(llm_config['api_key']) > 14 else "***"
+                print(f"[DEBUG] API Key: {masked_key}")
+            
             agent = CodexGraphAgentDebugger(
                 llm=llm_config,
                 prompt_path=prompt_path,
@@ -52,16 +59,18 @@ class CodeDebuggerPage(PageBase):
                 graph_db=graph_db,
                 max_iterations=max_iterations,
                 message_callback=self.create_update_message())
+            print(f"[DEBUG] Agent initialized successfully")
         except Exception as e:
             import traceback
+            error_msg = f'Failed to initialize agent: {str(e)}'
+            print(f'[ERROR] {error_msg}')
+            print(f'[ERROR] Traceback: {traceback.format_exc()}')
             print(
-                f'The e is {e}, while the traceback is{traceback.format_exc()}'
+                f'[ERROR] Prompt path: {prompt_path},  '
+                f'Schema path: {schema_path}, LLM config: {llm_config}'
             )
-            print(
-                f'The path of the prompt is {prompt_path},  '
-                f'the schema path is {schema_path}, the llm_config is {llm_config}'
-            )
-
+            # 显示更友好的错误信息
+            st.error(f'Agent initialization failed: {str(e)}\n\nPlease check:\n1. API key is set correctly\n2. API base URL is accessible\n3. Check console for detailed error messages')
             agent = None
         return agent
 

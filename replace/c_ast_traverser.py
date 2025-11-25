@@ -507,7 +507,7 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                             
                             # 进入函数作用域
                             client.enter_scope(symbol_id, srctrl.SymbolKind.FUNCTION)
-                            # print(f"  [CLIENT] Recorded FUNCTION: {client.symbolId_to_Name[symbol_id]} in {file_name}")
+                            print(f"  [CLIENT] Recorded FUNCTION: {client.symbolId_to_Name[symbol_id]} in {file_name}")
                     else:
                         # 函数声明处理 - 使用专门的辅助函数提取函数名
                         func_name_short = extract_function_name_from_definition(declarator)
@@ -533,7 +533,7 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                                 'parameters': parameters
                             }
                             client.recordSymbolKind(symbol_id, srctrl.SymbolKind.FUNCTION_DECLARATION, attributes) # <--- 修改
-                            # print(f"  [CLIENT] Recorded FUNCTION_DECLARATION: {client.symbolId_to_Name[symbol_id]} in {file_name}")
+                            print(f"  [CLIENT] Recorded FUNCTION_DECLARATION: {client.symbolId_to_Name[symbol_id]} in {file_name}")
                 
                 elif declarator.type == 'init_declarator' or declarator.type == 'declarator': # 变量声明 (可能带初始化)
                     # 只处理全局变量声明（在 translation_unit 层级），跳过局部变量
@@ -575,12 +575,12 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                                     symbol_id, 
                                     srctrl.ReferenceKind.USAGE # <--- 修改
                                 )
-                                # print(f"  [CLIENT] Recorded EXTERNAL_VARIABLE: {full_name} in {file_name}")
+                                print(f"  [CLIENT] Recorded EXTERNAL_VARIABLE: {full_name} in {file_name}")
                             elif is_const:
                                 name_hierarchy = NameHierarchy(var_name_short, client.current_context_name())
                                 symbol_id = client.recordSymbol(name_hierarchy, node_path=file_path, tree_node=node, kind_hint=symbolKindToString(srctrl.SymbolKind.GLOBAL_CONSTANT)) # <--- 修改
                                 client.recordSymbolKind(symbol_id, srctrl.SymbolKind.GLOBAL_CONSTANT) # <--- 修改
-                                # print(f"  [CLIENT] Recorded GLOBAL_CONSTANT: {client.symbolId_to_Name[symbol_id]}")
+                                print(f"  [CLIENT] Recorded GLOBAL_CONSTANT: {client.symbolId_to_Name[symbol_id]}")
                             else: # 普通全局变量定义
                                 name_hierarchy = NameHierarchy(var_name_short, client.current_context_name())
                                 symbol_id = client.recordSymbol(name_hierarchy, node_path=file_path, tree_node=node, kind_hint=symbolKindToString(srctrl.SymbolKind.GLOBAL_VARIABLE)) # <--- 修改
@@ -638,8 +638,8 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                                         end_name=client.symbolId_to_Name[member_symbol_id],
                                         params={'association_type': 'STRUCT_MEMBER'}
                                     )
-                                    # print(f"  [CLIENT] Recorded STRUCT_MEMBER: {client.symbolId_to_Name[member_symbol_id]}")
-                # print(f"  [CLIENT] Recorded STRUCT: {client.symbolId_to_Name[symbol_id]}")
+                                    print(f"  [CLIENT] Recorded STRUCT_MEMBER: {client.symbolId_to_Name[member_symbol_id]}")
+                print(f"  [CLIENT] Recorded STRUCT: {client.symbolId_to_Name[symbol_id]}")
 
         # 5. 联合体定义 (Union Definition)
         elif node_type == 'union_specifier':
@@ -655,7 +655,7 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                     body_start_line = body_node.start_point[0] + 1
                     body_end_line = body_node.end_point[0] + 1
                     client.recordSymbolScopeLocation(symbol_id, SourceRange(body_start_line, body_end_line))
-                # print(f"  [CLIENT] Recorded UNION: {client.symbolId_to_Name[symbol_id]}")
+                print(f"  [CLIENT] Recorded UNION: {client.symbolId_to_Name[symbol_id]}")
         
         # 6. 枚举定义 (Enum Definition)
         elif node_type == 'enum_specifier':
@@ -690,8 +690,8 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                                     end_name=client.symbolId_to_Name[member_symbol_id],
                                     params={'association_type': 'ENUM_MEMBER'}
                                 )
-                                # print(f"  [CLIENT] Recorded ENUM_MEMBER: {client.symbolId_to_Name[member_symbol_id]}")
-                # print(f"  [CLIENT] Recorded ENUM: {client.symbolId_to_Name[symbol_id]}")
+                                print(f"  [CLIENT] Recorded ENUM_MEMBER: {client.symbolId_to_Name[member_symbol_id]}")
+                print(f"  [CLIENT] Recorded ENUM: {client.symbolId_to_Name[symbol_id]}")
 
         # 7. typedef 定义 (Typedef Definition)
         elif node_type == 'typedef_declaration':
@@ -735,7 +735,7 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                         client.recordSymbolKind(symbol_id, srctrl.SymbolKind.GLOBAL_VARIABLE)
                     else:
                         client.recordSymbolKind(symbol_id, srctrl.SymbolKind.TYPEDEF) # <--- 修改
-                    # print(f"  [CLIENT] Recorded {kind_hint_str}: {client.symbolId_to_Name[symbol_id]}") # <--- 修改
+                    print(f"  [CLIENT] Recorded {kind_hint_str}: {client.symbolId_to_Name[symbol_id]}") # <--- 修改
         
         # 8. 宏定义 (Macro Definition) - preproc_def
         elif node_type == 'preproc_def':
@@ -745,7 +745,7 @@ def traverse_c_ast_and_record(client: AstVisitorClient, file_path: str):
                 name_hierarchy = NameHierarchy(macro_name_short, client.current_context_name())
                 symbol_id = client.recordSymbol(name_hierarchy, node_path=file_path, tree_node=node, kind_hint=symbolKindToString(srctrl.SymbolKind.MACRO)) # <--- 修改
                 client.recordSymbolKind(symbol_id, srctrl.SymbolKind.MACRO) # <--- 修改
-                # print(f"  [CLIENT] Recorded MACRO: {client.symbolId_to_Name[symbol_id]}")
+                print(f"  [CLIENT] Recorded MACRO: {client.symbolId_to_Name[symbol_id]}")
 
         # 9. 函数调用 (Call Expression)
         elif node_type == 'call_expression':

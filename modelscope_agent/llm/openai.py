@@ -49,9 +49,26 @@ class OpenAi(BaseChatModel):
             api_key = kwargs.get('api_key',
                                  os.getenv('OPENAI_API_KEY',
                                            default='EMPTY')).strip()
-            logger.info(f'client url {api_base}, client key: {api_key}')
-
-            self.client = OpenAI(api_key=api_key, base_url=api_base)
+            
+            # 详细的连接信息日志
+            logger.info(f'Initializing OpenAI client with:')
+            logger.info(f'  - API Base: {api_base}')
+            logger.info(f'  - API Key: {api_key[:10]}...{api_key[-4:] if len(api_key) > 14 else "***"}')
+            logger.info(f'  - Model: {model}')
+            
+            # 验证API key
+            if not api_key or api_key == 'EMPTY':
+                logger.warning('API key is empty or not set! Connection may fail.')
+                logger.warning('Please set OPENAI_API_KEY environment variable or pass api_key in kwargs')
+            
+            try:
+                self.client = OpenAI(api_key=api_key, base_url=api_base)
+                logger.info('OpenAI client initialized successfully')
+            except Exception as e:
+                logger.error(f'Failed to initialize OpenAI client: {str(e)}')
+                logger.error(f'API Base: {api_base}')
+                logger.error(f'API Key length: {len(api_key)}')
+                raise
 
         self.is_function_call = is_function_call
         self.is_chat = is_chat

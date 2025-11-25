@@ -1,5 +1,6 @@
 from copy import deepcopy
 import json
+import re
 
 from modelscope_agent.agents.codexgraph_agent.cypher_agent import \
     CODE_SEARCH_FORMAT
@@ -569,12 +570,20 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 elif result:
                     if isinstance(result, list):
                         collected_info += f"  - {tool_name}: 找到 {len(result)} 个结果\n"
-                        # 只显示前几个结果的摘要
-                        for i, item in enumerate(result[:3]):
+                        # 显示前几个结果的详细信息，包括代码片段
+                        for i, item in enumerate(result[:5]):  # 增加到5个结果
                             if isinstance(item, dict):
                                 name = item.get('name', item.get('from_name', ''))
                                 file_path = item.get('file_path', '')
+                                signature = item.get('signature', '')
+                                code = item.get('code', '')
                                 collected_info += f"    [{i+1}] {name} ({file_path})\n"
+                                if signature:
+                                    collected_info += f"        签名: {signature}\n"
+                                if code:
+                                    # 显示代码的前200字符作为预览
+                                    code_preview = code[:200].replace('\n', ' ')
+                                    collected_info += f"        代码预览: {code_preview}...\n"
                     else:
                         collected_info += f"  - {tool_name}: {str(result)[:200]}\n"
         
@@ -587,7 +596,9 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             "注意：\n"
             "- 如果信息不足，可以说明还需要哪些信息\n"
             "- 如果已经定位到 bug，请明确指出位置和原因\n"
+            "- 必须明确指出具体的函数名、类名、文件路径等，以便后续使用实际查询到的代码\n"
             "- 可以标记多个疑似位置，按可能性排序\n"
+            "- 在描述bug位置时，请引用上面查询结果中出现的具体节点名称和文件路径\n"
         )
         
         try:
@@ -797,20 +808,86 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         context_summary += f"问题分析: {plan.get('analysis', '')}\n\n"
         context_summary += f"Bug 定位结果:\n{bug_location}\n\n"
         
-        # 添加关键的执行结果
-        context_summary += "关键代码信息:\n"
+        # 收集所有查询到的相关代码节点，避免LLM编造代码
+        collected_code_nodes = []
+        seen_nodes = set()  # 用于去重，避免重复添加相同节点
+        
         for exec_result in execution_results:
             for tool_result in exec_result.get('results', []):
                 if tool_result.get('result') and not tool_result.get('error'):
                     result = tool_result.get('result')
-                    if isinstance(result, list) and len(result) > 0:
-                        # 只取第一个结果作为示例
-                        item = result[0]
-                        if isinstance(item, dict):
-                            code = item.get('code', '')
-                            if code:
-                                context_summary += f"\n```\n{code[:500]}\n```\n"
-                                break
+                    if isinstance(result, list):
+                        for item in result:
+                            if isinstance(item, dict):
+                                # 使用节点名和文件路径作为唯一标识
+                                node_name = item.get('name', item.get('from_name', ''))
+                                node_file = item.get('file_path', '')
+                                node_key = f"{node_file}::{node_name}"
+                                
+                                # 只收集包含代码的节点，且未收集过
+                                code = item.get('code', '')
+                                if code and node_key not in seen_nodes:
+                                    seen_nodes.add(node_key)
+                                    collected_code_nodes.append({
+                                        'name': node_name,
+                                        'file_path': node_file,
+                                        'code': code,
+                                        'signature': item.get('signature', ''),
+                                        'node_type': item.get('node_type', '')
+                                    })
+        
+        # 根据bug定位结果，对代码节点进行优先级排序
+        # 提取bug定位结果中提到的函数名/类名关键词
+        bug_keywords = []
+        if bug_location:
+            # 简单提取：查找bug定位结果中可能提到的函数名/类名
+            # 尝试匹配常见的代码实体名称模式
+            patterns = [
+                r'函数[：:]\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+                r'类[：:]\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+                r'方法[：:]\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+                r'([a-zA-Z_][a-zA-Z0-9_]*)\s*函数',
+                r'([a-zA-Z_][a-zA-Z0-9_]*)\s*类',
+            ]
+            for pattern in patterns:
+                matches = re.findall(pattern, bug_location)
+                bug_keywords.extend(matches)
+        
+        # 对节点进行排序：包含bug关键词的节点优先
+        # 保存函数参数 file_path 到局部变量，避免与内部变量名冲突
+        query_file_path = file_path.lower() if file_path else ''
+        
+        def node_priority(node):
+            name = node.get('name', '').lower()
+            node_file_path = node.get('file_path', '').lower()
+            score = 0
+            for keyword in bug_keywords:
+                kw_lower = keyword.lower()
+                if kw_lower in name:
+                    score += 10
+                if kw_lower in node_file_path:
+                    score += 5
+            # 如果提供了文件路径，且与用户查询的文件路径匹配，提高优先级
+            if query_file_path and query_file_path in node_file_path:
+                score += 3
+            return -score  # 负号用于降序排序（分数高的在前）
+        
+        if collected_code_nodes:
+            collected_code_nodes.sort(key=node_priority)
+            context_summary += f"【实际查询到的代码节点】（共 {len(collected_code_nodes)} 个，已按相关性排序）\n\n"
+            context_summary += "重要：请严格使用以下实际代码，不要编造或修改代码内容。\n"
+            context_summary += "注意：排在前面的节点可能与bug位置更相关，请优先使用。\n\n"
+            
+            for idx, node in enumerate(collected_code_nodes, 1):
+                context_summary += f"### 节点 {idx}: {node['name']}\n"
+                context_summary += f"文件路径: {node['file_path']}\n"
+                if node.get('signature'):
+                    context_summary += f"签名: {node['signature']}\n"
+                context_summary += f"```{self.language if hasattr(self, 'language') else 'python'}\n"
+                context_summary += f"{node['code']}\n"
+                context_summary += "```\n\n"
+        else:
+            context_summary += "【警告】未查询到任何代码节点，请基于问题描述和bug定位结果进行分析。\n\n"
 
         # 使用原有的生成修复方案的 prompt
         generate_queries = self.generate_queries_template.substitute()
@@ -818,7 +895,12 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         fix_prompt = (
             f"{context_summary}\n\n"
             f"{generate_queries}\n\n"
-            "请基于以上信息生成修复方案。"
+            "请基于以上信息生成修复方案。\n"
+            "重要要求：\n"
+            "- 如果上面提供了实际代码，必须使用提供的实际代码作为 <original> 部分，不要编造代码\n"
+            "- 如果代码较长，可以只显示关键部分，但必须是从上面实际代码中提取的\n"
+            "- 修复方案中的 <patched> 部分应该基于实际代码进行修改\n"
+            "- 如果确实需要参考其他代码，请明确说明并说明原因"
         )
 
         try:
