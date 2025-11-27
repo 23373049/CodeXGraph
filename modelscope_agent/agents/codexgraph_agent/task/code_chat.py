@@ -266,6 +266,72 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                 pass
         return response
 
+    def function_planner_llm(self, user_query: str, initial_callinfo: dict = None):
+        """
+        让 LLM 先设计一个解决问题的步骤化计划（有序的 function 调用序列）。
+        返回一个 list，每项为 {"name": <func_name>, "arguments": {"keyword": ...}}
+        如果 LLM 无法返回合法 JSON，则返回 None 并由主流程回退到原有逻辑。
+        """
+        import json
+        funcs = [func['name'] for func in self.FUNCTIONS]
+        sys_msg = (
+            "你是一个规划器。给出解决用户需求的分步计划，计划由若干步骤组成，"
+            "每步为可调用的本地函数工具。可用工具: %s。"
+            "只返回一个 JSON 对象，顶层为一个数组 (plan)，每个数组项是 {\"name\":工具名, \"arguments\":{...}, \"rationale\": \"本步的简要分析说明\"}，"
+            "工具名必须来自可用工具列表，arguments 只包含 keyword。rationale 字段为可选但建议提供，用以说明为何需要此步以及预期带来什么信息。"
+        ) % funcs
+
+        user_msg = (
+            f"用户问题: {user_query}\n"
+            "请设计尽可能精简且可执行的步骤来解决该问题，只输出 JSON，不要任何额外注释。"
+        )
+
+        messages = [
+            {"role": "system", "content": sys_msg},
+            {"role": "user", "content": user_msg}
+        ]
+
+        resp = self.llm_call(messages)
+        # 解析 JSON。支持 str 或 dict 返回
+        parsed = None
+        try:
+            if isinstance(resp, str):
+                parsed = json.loads(resp)
+            elif isinstance(resp, dict):
+                parsed = resp
+        except Exception:
+            parsed = None
+
+        if not parsed:
+            return None
+
+        # 支持两种返回格式：直接数组或 {"plan": [...]} 的对象
+        if isinstance(parsed, dict) and 'plan' in parsed:
+            plan = parsed['plan']
+        elif isinstance(parsed, list):
+            plan = parsed
+        else:
+            return None
+
+        # 做一个简单校验并确保每步包含必要字段，填充缺省 rationale
+        if not isinstance(plan, list):
+            return None
+        validated = []
+        valid_names = set(funcs)
+        for step in plan:
+            if not isinstance(step, dict) or 'name' not in step:
+                return None
+            name = step.get('name')
+            if name not in valid_names:
+                # 名称非法，拒绝计划
+                return None
+            args = step.get('arguments', {}) or {}
+            # 只保留 keyword 参数，防止注入
+            args = {'keyword': args.get('keyword', '')}
+            rationale = step.get('rationale') or ''
+            validated.append({'name': name, 'arguments': args, 'rationale': rationale})
+        return validated
+
 
     # 4. 分发到本地function，生成Cypher
     def dispatch_function_call(self, callinfo: dict) -> str:
@@ -399,6 +465,77 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
 
         # 2. 分发到本地function，生成Cypher
         cypher_query = self.dispatch_function_call(callinfo)
+
+        # 2.a 先让 LLM 设计一个分步计划（可选）。如果规划器返回步骤序列，则按序执行每步并聚合结果，
+        # 最后交给 LLM 生成最终答案；否则回退到原有的单步执行逻辑。
+        plan = None
+        try:
+            plan = self.function_planner_llm(user_query, callinfo)
+        except Exception:
+            plan = None
+
+        if plan:
+            collected = []
+            # 在执行前渲染 TODO 表，展示每步及 rationale，给用户可见的分析流程
+            try:
+                todo_table = "[Planned Steps]\n序号 | 工具名 | 参数(keyword) | 说明\n"
+                for idx, s in enumerate(plan, start=1):
+                    todo_table += f"{idx} | {s.get('name')} | {s.get('arguments', {}).get('keyword','')} | {s.get('rationale','')}\n"
+                self.update_agent_message(todo_table)
+            except Exception:
+                pass
+            for step in plan:
+                step_name = step.get('name')
+                step_args = step.get('arguments', {})
+                step_callinfo = {'name': step_name, 'arguments': step_args}
+                step_cypher = self.dispatch_function_call(step_callinfo)
+                step_result = None
+                if step_cypher:
+                    try:
+                        step_result = self.cypher_agent.run(
+                            step_cypher, retries=self.max_iterations_cypher)
+                    except Exception:
+                        step_result = None
+                collected.append({'step': step_callinfo, 'cypher': step_cypher, 'result': step_result})
+                try:
+                    self.update_agent_message(f"[planner executed] {step_name} -> {step_cypher}")
+                except Exception:
+                    pass
+
+            # 聚合执行结果，交给 LLM 生成最终答案
+            summary = "根据规划器设计并执行的步骤，以下是每步的 Cypher 与返回结果：\n"
+            summary += f"用户问题: {user_query}\n\n"
+            for idx, item in enumerate(collected, start=1):
+                summary += f"步骤 {idx}: {item['step'].get('name')} 参数: {item['step'].get('arguments')}\n"
+                summary += f"Cypher: {item.get('cypher')}\n"
+                res_preview = item.get('result')
+                try:
+                    if isinstance(res_preview, list):
+                        summary += f"结果数量: {len(res_preview)}，示例: {res_preview[:3]}\n\n"
+                    else:
+                        summary += f"结果: {str(res_preview)[:1000]}\n\n"
+                except Exception:
+                    summary += "结果: (无法显示)\n\n"
+
+            final_prompt = (
+                "你是代码审查助手。请基于上面每步的执行结果，回答用户的原始问题，\n"
+                "给出清晰、结构化的中文回复（先结论，再按部件列出职责与依据摘录）。\n"
+            )
+            final_prompt += summary
+            analysis = self.llm_call([{"role": "user", "content": final_prompt}])
+
+            # 将规划步骤作为“思考流程”附加到最终回答中，便于用户查看LLM的分析过程
+            try:
+                plan_section = "\n【思考流程（Planned Steps）】\n序号 | 工具名 | 参数(keyword) | 说明\n"
+                for idx, s in enumerate(plan, start=1):
+                    plan_section += f"{idx} | {s.get('name')} | {s.get('arguments', {}).get('keyword','')} | {s.get('rationale','')}\n"
+            except Exception:
+                plan_section = "\n【思考流程（Planned Steps）】\n(无法生成规划步骤展示)\n"
+
+            # 把 LLM 的分析结果和思考流程合并返回
+            return f"{analysis}\n\n{plan_section}"
+
+        # 如果没有规划器返回或解析失败，则使用原有单步执行流程
         if cypher_query:
             user_response = self.cypher_agent.run(
                 cypher_query, retries=self.max_iterations_cypher)
