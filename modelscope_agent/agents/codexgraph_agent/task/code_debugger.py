@@ -892,6 +892,13 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         # 使用原有的生成修复方案的 prompt
         generate_queries = self.generate_queries_template.substitute()
         
+        # 输出日志，便于排查传给大模型的完整上下文
+        try:
+            logger.info("[Fix Solution] context_summary length: %d chars", len(context_summary))
+            logger.debug("[Fix Solution] context_summary preview:\n%s", context_summary[:2000])
+        except Exception:
+            pass
+
         fix_prompt = (
             f"{context_summary}\n\n"
             f"{generate_queries}\n\n"
