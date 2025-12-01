@@ -609,6 +609,168 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             logger.exception("Bug localization failed")
             return f"Bug 定位分析失败: {str(e)}\n\n{collected_info}"
 
+    def fetch_target_code_from_bug_location(self, bug_location: str, file_path: str = '') -> list:
+        """
+        从bug定位结果中提取函数/类名，然后查询数据库获取实际代码。
+        返回目标代码节点列表，用于作为original代码。
+        """
+        if not bug_location:
+            return []
+        
+        # 提取bug定位结果中提到的函数名/类名/文件名
+        target_entities = []
+        
+        # 模式1: 提取明确的函数/类名（中文描述）
+        patterns = [
+            r'函数[：:]\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+            r'类[：:]\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+            r'方法[：:]\s*([a-zA-Z_][a-zA-Z0-9_]*)',
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*函数',
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\.([a-zA-Z_][a-zA-Z0-9_]*)',  # 类.方法
+        ]
+        
+        for pattern in patterns:
+            matches = re.findall(pattern, bug_location)
+            if matches:
+                if isinstance(matches[0], tuple):
+                    # 处理类.方法的情况
+                    for match in matches:
+                        if len(match) == 2:
+                            target_entities.append(match[0])  # 类名
+                            target_entities.append(match[1])  # 方法名
+                        else:
+                            target_entities.append(match[0])
+                else:
+                    target_entities.extend(matches)
+        
+        # 模式2: 提取文件路径
+        file_patterns = [
+            r'文件[：:]\s*([^\s\n]+\.(py|c|h|cpp|java|js|ts))',
+            r'路径[：:]\s*([^\s\n]+)',
+            r'`([^\s`]+\.(py|c|h|cpp|java|js|ts))`',
+        ]
+        target_files = []
+        for pattern in file_patterns:
+            matches = re.findall(pattern, bug_location)
+            if matches:
+                if isinstance(matches[0], tuple):
+                    target_files.extend([m[0] if isinstance(m, tuple) else m for m in matches])
+                else:
+                    target_files.extend(matches)
+        
+        # 去重
+        target_entities = list(set(target_entities))
+        target_files = list(set(target_files))
+        
+        if not target_entities and not target_files:
+            logger.debug("No target entities or files extracted from bug location")
+            return []
+        
+        logger.info(f"Extracted target entities: {target_entities}, target files: {target_files}")
+        
+        # 查询目标代码
+        collected_nodes = []
+        seen_nodes = set()
+        
+        # 1. 根据实体名查询
+        for entity_name in target_entities:
+            if not entity_name or len(entity_name) < 2:
+                continue
+                
+            try:
+                # 尝试多种查询方式
+                # 方式1: 精确匹配函数名
+                callinfo = {"name": "find_function_by_keyword", "arguments": {"keyword": entity_name}}
+                cypher = self.dispatch_function_call(callinfo)
+                if cypher:
+                    result = self.cypher_agent.run(cypher, retries=self.max_iterations_cypher)
+                    if result and isinstance(result, list):
+                        for item in result:
+                            if isinstance(item, dict) and item.get('code'):
+                                node_key = f"{item.get('file_path', '')}::{item.get('name', '')}"
+                                if node_key not in seen_nodes:
+                                    seen_nodes.add(node_key)
+                                    collected_nodes.append(item)
+                
+                # 方式2: 精确匹配类名
+                callinfo = {"name": "find_class_by_keyword", "arguments": {"keyword": entity_name}}
+                cypher = self.dispatch_function_call(callinfo)
+                if cypher:
+                    result = self.cypher_agent.run(cypher, retries=self.max_iterations_cypher)
+                    if result and isinstance(result, list):
+                        for item in result:
+                            if isinstance(item, dict) and item.get('code'):
+                                node_key = f"{item.get('file_path', '')}::{item.get('name', '')}"
+                                if node_key not in seen_nodes:
+                                    seen_nodes.add(node_key)
+                                    collected_nodes.append(item)
+                
+                # 方式3: 通用实体查询（作为备选）
+                callinfo = {"name": "introduce_entity", "arguments": {"keyword": entity_name}}
+                cypher = self.dispatch_function_call(callinfo)
+                if cypher:
+                    result = self.cypher_agent.run(cypher, retries=self.max_iterations_cypher)
+                    if result and isinstance(result, list):
+                        for item in result:
+                            if isinstance(item, dict) and item.get('code'):
+                                node_key = f"{item.get('file_path', '')}::{item.get('name', '')}"
+                                if node_key not in seen_nodes:
+                                    seen_nodes.add(node_key)
+                                    collected_nodes.append(item)
+            except Exception as e:
+                logger.warning(f"Failed to query entity {entity_name}: {str(e)}")
+                continue
+        
+        # 2. 根据文件路径查询
+        for file_path_keyword in target_files:
+            if not file_path_keyword:
+                continue
+                
+            try:
+                # 提取文件名（去掉路径前缀）
+                file_name = file_path_keyword.split('/')[-1].split('\\')[-1]
+                
+                callinfo = {"name": "find_nodes_in_file", "arguments": {"keyword": file_name}}
+                cypher = self.dispatch_function_call(callinfo)
+                if cypher:
+                    result = self.cypher_agent.run(cypher, retries=self.max_iterations_cypher)
+                    if result and isinstance(result, list):
+                        for item in result:
+                            if isinstance(item, dict):
+                                # 检查文件路径是否匹配
+                                item_file = item.get('file_path', '')
+                                if file_name in item_file or file_path_keyword in item_file:
+                                    code = item.get('code', '')
+                                    if code:
+                                        node_key = f"{item_file}::{item.get('name', '')}"
+                                        if node_key not in seen_nodes:
+                                            seen_nodes.add(node_key)
+                                            collected_nodes.append(item)
+            except Exception as e:
+                logger.warning(f"Failed to query file {file_path_keyword}: {str(e)}")
+                continue
+        
+        # 如果提供了file_path参数，也尝试查询
+        if file_path:
+            try:
+                file_name = file_path.split('/')[-1].split('\\')[-1].strip('`').strip()
+                callinfo = {"name": "find_nodes_in_file", "arguments": {"keyword": file_name}}
+                cypher = self.dispatch_function_call(callinfo)
+                if cypher:
+                    result = self.cypher_agent.run(cypher, retries=self.max_iterations_cypher)
+                    if result and isinstance(result, list):
+                        for item in result:
+                            if isinstance(item, dict) and item.get('code'):
+                                node_key = f"{item.get('file_path', '')}::{item.get('name', '')}"
+                                if node_key not in seen_nodes:
+                                    seen_nodes.add(node_key)
+                                    collected_nodes.append(item)
+            except Exception as e:
+                logger.warning(f"Failed to query file_path {file_path}: {str(e)}")
+        
+        logger.info(f"Fetched {len(collected_nodes)} target code nodes")
+        return collected_nodes
+
     def _run(self, user_query: str, file_path: str = '', **kwargs) -> str:
         """
         改进后的调试流程：
@@ -616,7 +778,8 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         2. 按计划执行工具调用
         3. 验证结果并调整计划（如需要）
         4. Bug 定位
-        5. 生成修复方案
+        4.5. 根据bug定位结果查询目标代码（作为original）
+        5. 生成修复方案（基于实际查询到的目标代码）
         """
         self.chat_history = []
 
@@ -675,9 +838,24 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             logger.exception("Bug localization failed")
             bug_location = f"Bug 定位过程出错: {str(e)}"
 
+        # 阶段4.5: 根据bug定位结果，查询目标代码作为original
+        target_code_nodes = []
+        try:
+            self.update_agent_message("[Target Code Fetch] 正在查询需要修改的目标代码...")
+            target_code_nodes = self.fetch_target_code_from_bug_location(bug_location, file_path)
+            if target_code_nodes:
+                self.update_agent_message(f"[Target Code Fetch] 成功查询到 {len(target_code_nodes)} 个目标代码节点")
+            else:
+                self.update_agent_message("[Target Code Fetch] 未查询到目标代码，将使用之前收集的代码")
+        except Exception as e:
+            logger.exception("Failed to fetch target code")
+            self.update_agent_message(f"[Target Code Fetch] 查询目标代码失败: {str(e)}")
+
         # 阶段5: 生成修复方案
         try:
-            fix_solution = self.generate_fix_solution(user_query, file_path_str, debug_plan, execution_results, bug_location)
+            fix_solution = self.generate_fix_solution(
+                user_query, file_path_str, debug_plan, execution_results, 
+                bug_location, target_code_nodes)
         except Exception as e:
             logger.exception("Fix solution generation failed")
             fix_solution = f"修复方案生成失败: {str(e)}"
@@ -796,9 +974,13 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         return answer
 
     def generate_fix_solution(self, user_query: str, file_path: str, plan: dict, 
-                              execution_results: list, bug_location: str) -> str:
+                              execution_results: list, bug_location: str, 
+                              target_code_nodes: list = None) -> str:
         """
         基于收集的信息和 bug 定位结果，生成修复方案。
+        
+        Args:
+            target_code_nodes: 从bug定位结果中查询到的目标代码节点，将优先作为original代码使用
         """
         # 汇总所有信息
         context_summary = f"问题描述: {user_query}\n\n"
@@ -812,6 +994,27 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         collected_code_nodes = []
         seen_nodes = set()  # 用于去重，避免重复添加相同节点
         
+        # 优先使用从bug定位结果中查询到的目标代码节点
+        if target_code_nodes:
+            for item in target_code_nodes:
+                if isinstance(item, dict):
+                    node_name = item.get('name', item.get('from_name', ''))
+                    node_file = item.get('file_path', '')
+                    node_key = f"{node_file}::{node_name}"
+                    code = item.get('code', '')
+                    
+                    if code and node_key not in seen_nodes:
+                        seen_nodes.add(node_key)
+                        collected_code_nodes.append({
+                            'name': node_name,
+                            'file_path': node_file,
+                            'code': code,
+                            'signature': item.get('signature', ''),
+                            'node_type': item.get('node_type', ''),
+                            'is_target': True  # 标记为目标代码
+                        })
+        
+        # 然后收集执行结果中的代码节点（作为补充）
         for exec_result in execution_results:
             for tool_result in exec_result.get('results', []):
                 if tool_result.get('result') and not tool_result.get('error'):
@@ -833,7 +1036,8 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                                         'file_path': node_file,
                                         'code': code,
                                         'signature': item.get('signature', ''),
-                                        'node_type': item.get('node_type', '')
+                                        'node_type': item.get('node_type', ''),
+                                        'is_target': False
                                     })
         
         # 根据bug定位结果，对代码节点进行优先级排序
@@ -873,13 +1077,28 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             return -score  # 负号用于降序排序（分数高的在前）
         
         if collected_code_nodes:
-            collected_code_nodes.sort(key=node_priority)
-            context_summary += f"【实际查询到的代码节点】（共 {len(collected_code_nodes)} 个，已按相关性排序）\n\n"
+            # 先按是否为目标代码排序（目标代码优先），再按相关性排序
+            def combined_priority(node):
+                is_target = node.get('is_target', False)
+                base_priority = node_priority(node)
+                # 目标代码优先级更高（分数更小，因为返回负值）
+                return base_priority - (100 if is_target else 0)
+            
+            collected_code_nodes.sort(key=combined_priority)
+            
+            # 统计目标代码数量
+            target_count = sum(1 for n in collected_code_nodes if n.get('is_target', False))
+            
+            context_summary += f"【实际查询到的代码节点】（共 {len(collected_code_nodes)} 个，其中 {target_count} 个为目标代码，已按相关性排序）\n\n"
             context_summary += "重要：请严格使用以下实际代码，不要编造或修改代码内容。\n"
-            context_summary += "注意：排在前面的节点可能与bug位置更相关，请优先使用。\n\n"
+            context_summary += "注意：\n"
+            context_summary += "- 标记为【目标代码】的节点是从bug定位结果中精确查询到的，必须作为 <original> 使用\n"
+            context_summary += "- 排在前面的节点可能与bug位置更相关，请优先使用\n\n"
             
             for idx, node in enumerate(collected_code_nodes, 1):
-                context_summary += f"### 节点 {idx}: {node['name']}\n"
+                is_target = node.get('is_target', False)
+                target_mark = "【目标代码】" if is_target else ""
+                context_summary += f"### 节点 {idx}: {node['name']} {target_mark}\n"
                 context_summary += f"文件路径: {node['file_path']}\n"
                 if node.get('signature'):
                     context_summary += f"签名: {node['signature']}\n"
@@ -897,10 +1116,13 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             f"{generate_queries}\n\n"
             "请基于以上信息生成修复方案。\n"
             "重要要求：\n"
-            "- 如果上面提供了实际代码，必须使用提供的实际代码作为 <original> 部分，不要编造代码\n"
-            "- 如果代码较长，可以只显示关键部分，但必须是从上面实际代码中提取的\n"
-            "- 修复方案中的 <patched> 部分应该基于实际代码进行修改\n"
-            "- 如果确实需要参考其他代码，请明确说明并说明原因"
+            "- 如果上面提供了标记为【目标代码】的节点，必须使用该节点的完整代码作为 <original> 部分\n"
+            "- 如果没有【目标代码】，优先使用排在前面的节点代码作为 <original>\n"
+            "- 绝对不要编造代码，必须使用上面提供的实际代码\n"
+            "- 如果代码较长，可以只显示关键部分，但必须是从上面实际代码中完整提取的（不能修改）\n"
+            "- 修复方案中的 <patched> 部分应该基于 <original> 中的实际代码进行修改\n"
+            "- 如果确实需要参考其他代码，请明确说明并说明原因\n"
+            "- 确保 <original> 中的代码与上面提供的代码完全一致"
         )
 
         try:
