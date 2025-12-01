@@ -570,27 +570,20 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 elif result:
                     if isinstance(result, list):
                         collected_info += f"  - {tool_name}: 找到 {len(result)} 个结果\n"
-                        # 显示所有结果的完整代码（用于准确bug定位）
-                        # 注意：这里传递完整代码，而不是预览，确保LLM能看到完整的代码逻辑
-                        for i, item in enumerate(result):  # 显示所有结果，不限制数量
+                        # 显示前几个结果的详细信息，包括代码片段
+                        for i, item in enumerate(result[:5]):  # 增加到5个结果
                             if isinstance(item, dict):
                                 name = item.get('name', item.get('from_name', ''))
                                 file_path = item.get('file_path', '')
                                 signature = item.get('signature', '')
                                 code = item.get('code', '')
-                                
-                                collected_info += f"\n    --- 结果 {i+1}: {name} ---\n"
-                                collected_info += f"    文件路径: {file_path}\n"
+                                collected_info += f"    [{i+1}] {name} ({file_path})\n"
                                 if signature:
-                                    collected_info += f"    签名: {signature}\n"
+                                    collected_info += f"        签名: {signature}\n"
                                 if code:
-                                    # 传递完整代码，确保LLM能看到完整的代码逻辑进行准确bug定位
-                                    collected_info += f"    完整代码:\n"
-                                    collected_info += f"    ```{self.language if hasattr(self, 'language') else 'python'}\n"
-                                    collected_info += f"    {code}\n"
-                                    collected_info += f"    ```\n"
-                                else:
-                                    collected_info += f"    [注意：此节点没有代码内容]\n"
+                                    # 显示代码的前200字符作为预览
+                                    code_preview = code[:200].replace('\n', ' ')
+                                    collected_info += f"        代码预览: {code_preview}...\n"
                     else:
                         collected_info += f"  - {tool_name}: {str(result)[:200]}\n"
         
