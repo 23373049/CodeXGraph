@@ -44,7 +44,7 @@ class OpenAi(BaseChatModel):
             )
         else:
             default_api_base = os.getenv('OPENAI_API_BASE',
-                                         'https://jeniya.cn/v1')
+                                         'https://api.deepseek.com')
             api_base = kwargs.get('api_base', default_api_base).strip()
             api_key = kwargs.get('api_key',
                                  os.getenv('OPENAI_API_KEY',

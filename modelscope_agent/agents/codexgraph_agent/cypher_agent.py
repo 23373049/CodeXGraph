@@ -60,10 +60,47 @@ class CypherAgent(Agent):
 
         return resp
 
-    def _run(self, cypher_queries: str, retries: int = 5, **kwargs) -> str:
+    def _run(self, cypher_queries: str, retries: int = 5, **kwargs):
         """
-        Executes a series of Cypher queries by interacting with a language model and a graph database.
+        Executes Cypher queries.
+
+        两种模式：
+        1. 默认模式（structured=False）：保持原有行为，走 LLM 生成 Cypher 的闭环，返回字符串，兼容旧逻辑。
+        2. 结构化模式（structured=True）：直接把传入的 cypher_queries 当作 Cypher 执行，
+           返回 List[Dict]，每条记录是图数据库返回的一行，字段包括 code / file_path 等，
+           方便上层（如 debugger）直接消费结构化结果。
         """
+        structured = kwargs.get('structured', False)
+
+        # ---- 模式2：结构化结果，直接执行给定 Cypher ----
+        if structured:
+            cypher = cypher_queries
+            # 如果有 task_id，则为节点自动加上任务标签，复用原来的 add_label_to_nodes 逻辑
+            if self.task_id:
+                cypher = add_label_to_nodes(cypher, f'`{self.task_id}`')
+
+            cypher_response, flag = self.graph_db.execute_query_with_timeout(
+                cypher)
+
+            if isinstance(cypher_response, str):
+                # 执行报错或超时等情况，直接返回空列表，由上层根据 error 处理
+                return []
+
+            records = []
+            for record in cypher_response:
+                # py2neo Record 通常有 data() 方法；兜底用 dict/str
+                try:
+                    if hasattr(record, 'data'):
+                        row = record.data()
+                    else:
+                        row = dict(record)
+                except Exception:
+                    row = {'_raw': process_string(str(record))}
+                records.append(row)
+
+            return records
+
+        # ---- 模式1：原有字符串模式（LLM 生成 Cypher） ----
         cypher_messages = [
             {
                 'role': 'system',

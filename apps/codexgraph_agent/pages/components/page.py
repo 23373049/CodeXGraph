@@ -44,14 +44,14 @@ def get_llm_config(llm_name):
     if llm_name == 'deepseek-coder':
         llm_config = {
             'model': 'deepseek-coder',
-            'api_base': 'https://jeniya.cn/v1',
+            'api_base': 'https://api.deepseek.com',
             'api_key': api_key,
             'model_server': 'openai'
         }
     elif llm_name == 'gpt-4o':
         llm_config = {
             'model': 'gpt-4o-2024-05-13',
-            'api_base': 'https://jeniya.cn/v1',
+            'api_base': 'https://api.deepseek.com',
             'api_key': api_key,
             'model_server': 'openai'
         }
@@ -154,8 +154,7 @@ class PageBase(ABC):
 
         if not openai_api_key:
             self.warning(
-                'Enter your OpenAI/Deepseek API key in the sidebar. '
-                'For jeniya API, use your API key in the format: sk-...')
+                'Enter your OpenAI/Deepseek API key in the sidebar. ')
         else:
             # 验证API key格式
             if not openai_api_key.startswith('sk-'):

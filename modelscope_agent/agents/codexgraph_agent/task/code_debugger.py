@@ -282,20 +282,48 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
     # ---- end reusable functions ----
 
     def find_nodes_in_file(self, keyword):
-        return f"MATCH (n) WHERE n.file_path CONTAINS '{keyword}' RETURN labels(n) AS node_type, n.name, n.file_path, n"
+        # 返回统一字段名，便于后续直接使用：node_type / name / file_path / signature / code
+        return (
+            "MATCH (n) WHERE n.file_path CONTAINS '{keyword}' "
+            "RETURN labels(n) AS node_type, "
+            "n.name AS name, "
+            "n.file_path AS file_path, "
+            "n.signature AS signature, "
+            "n.code AS code"
+        ).format(keyword=keyword)
 
     def find_class_by_keyword(self, keyword):
         labels = self._label_map()
         class_label = labels.get('class_label', 'CLASS')
-        return f"MATCH (c:{class_label}) WHERE c.name CONTAINS '{keyword}' RETURN c.name, c.file_path, c.signature, c.code"
+        return (
+            "MATCH (c:{class_label}) WHERE c.name CONTAINS '{keyword}' "
+            "RETURN c.name AS name, "
+            "c.file_path AS file_path, "
+            "c.signature AS signature, "
+            "c.code AS code"
+        ).format(class_label=class_label, keyword=keyword)
 
     def find_function_by_keyword(self, keyword):
         labels = self._label_map()
         method_label = labels.get('method_label', 'FUNCTION')
-        return f"MATCH (f:{method_label}) WHERE f.name CONTAINS '{keyword}' RETURN f.name, f.file_path, f.signature, f.code"
+        return (
+            "MATCH (f:{method_label}) WHERE f.name CONTAINS '{keyword}' "
+            "RETURN f.name AS name, "
+            "f.file_path AS file_path, "
+            "f.signature AS signature, "
+            "f.code AS code"
+        ).format(method_label=method_label, keyword=keyword)
 
     def introduce_entity(self, keyword):
-        return f"MATCH (n) WHERE n.name CONTAINS '{keyword}' RETURN labels(n) AS node_type, n.name, n.file_path, n.code"
+        # 为统一起见，这里也返回 signature 字段（即使某些节点可能没有该属性）
+        return (
+            "MATCH (n) WHERE n.name CONTAINS '{keyword}' "
+            "RETURN labels(n) AS node_type, "
+            "n.name AS name, "
+            "n.file_path AS file_path, "
+            "n.signature AS signature, "
+            "n.code AS code"
+        ).format(keyword=keyword)
 
     def find_references(self, keyword):
         """查找引用关系：查找与目标实体通过常见引用/调用关系相连的节点，并返回节点与关系信息。"""
@@ -483,7 +511,11 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 continue
             
             try:
-                query_result = self.cypher_agent.run(cypher_query, retries=self.max_iterations_cypher)
+                # 使用结构化结果模式，直接从图数据库拿到 List[Dict]，包含 code 等字段
+                query_result = self.cypher_agent.run(
+                    cypher_query,
+                    retries=self.max_iterations_cypher,
+                    structured=True)
                 step_results.append({
                     'tool': tool_name,
                     'result': query_result,
@@ -810,6 +842,8 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         
         # 收集所有查询到的相关代码节点，避免LLM编造代码
         collected_code_nodes = []
+        # 同时收集那些没有 code、但有名称/路径等信息的节点，作为补充上下文
+        collected_meta_only_nodes = []
         seen_nodes = set()  # 用于去重，避免重复添加相同节点
         
         for exec_result in execution_results:
@@ -823,17 +857,29 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                                 node_name = item.get('name', item.get('from_name', ''))
                                 node_file = item.get('file_path', '')
                                 node_key = f"{node_file}::{node_name}"
-                                
-                                # 只收集包含代码的节点，且未收集过
+
+                                # 统一字段提取
                                 code = item.get('code', '')
+                                signature = item.get('signature', '')
+                                node_type = item.get('node_type', '')
+
+                                # 有 code 的优先收集到代码节点列表
                                 if code and node_key not in seen_nodes:
                                     seen_nodes.add(node_key)
                                     collected_code_nodes.append({
                                         'name': node_name,
                                         'file_path': node_file,
                                         'code': code,
-                                        'signature': item.get('signature', ''),
-                                        'node_type': item.get('node_type', '')
+                                        'signature': signature,
+                                        'node_type': node_type
+                                    })
+                                # 没有 code 但有基本信息的，收集到 meta-only 列表，便于提供上下文
+                                elif (node_name or node_file) and not code:
+                                    collected_meta_only_nodes.append({
+                                        'name': node_name,
+                                        'file_path': node_file,
+                                        'signature': signature,
+                                        'node_type': node_type
                                     })
         
         # 根据bug定位结果，对代码节点进行优先级排序
@@ -887,7 +933,19 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 context_summary += f"{node['code']}\n"
                 context_summary += "```\n\n"
         else:
-            context_summary += "【警告】未查询到任何代码节点，请基于问题描述和bug定位结果进行分析。\n\n"
+            context_summary += "【警告】未查询到任何带 code 的节点，将仅基于元信息和 bug 定位结果进行分析。\n\n"
+
+        # 补充：即便没有 code，也把仅包含名称/路径的节点信息提供给大模型，作为参考上下文
+        if collected_meta_only_nodes:
+            context_summary += f"【仅包含元信息的相关节点】（共 {len(collected_meta_only_nodes)} 个）\n\n"
+            for idx, node in enumerate(collected_meta_only_nodes, 1):
+                context_summary += f"### 节点(无代码) {idx}: {node.get('name', '')}\n"
+                context_summary += f"文件路径: {node.get('file_path', '')}\n"
+                if node.get('signature'):
+                    context_summary += f"签名: {node['signature']}\n"
+                if node.get('node_type'):
+                    context_summary += f"类型: {node['node_type']}\n"
+                context_summary += "\n"
 
         # 使用原有的生成修复方案的 prompt
         generate_queries = self.generate_queries_template.substitute()

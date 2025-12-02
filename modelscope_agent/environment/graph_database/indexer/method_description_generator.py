@@ -60,7 +60,7 @@ class MethodDescriptionGenerator:
                         return {
                             'model_name': setting_data.get('llm_model_name', 'deepseek-coder'),
                             'api_key': os.getenv('OPENAI_API_KEY', 'sk-aabc879cff054d9fac7025eb491ef163'),
-                            'base_url': os.getenv('OPENAI_BASE_URL', 'https://jeniya.cn/v1'),
+                            'base_url': os.getenv('OPENAI_BASE_URL', 'https://api.deepseek.com'),
                             'max_tokens': 200,
                             'temperature': setting_data.get('llm_temperature', 0.3)
                         }
@@ -71,7 +71,7 @@ class MethodDescriptionGenerator:
         return {
             'model_name': 'deepseek-coder',  # 默认使用deepseek-coder
             'api_key': os.getenv('OPENAI_API_KEY', 'sk-aabc879cff054d9fac7025eb491ef163'),
-            'base_url': os.getenv('OPENAI_BASE_URL', 'https://jeniya.cn/v1'),
+            'base_url': os.getenv('OPENAI_BASE_URL', 'https://api.deepseek.com'),
             'max_tokens': 200,
             'temperature': 0.3
         }
