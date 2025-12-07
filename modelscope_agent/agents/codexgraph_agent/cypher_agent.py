@@ -82,8 +82,17 @@ class CypherAgent(Agent):
             cypher_response, flag = self.graph_db.execute_query_with_timeout(
                 cypher)
 
+            # 处理错误情况
             if isinstance(cypher_response, str):
                 # 执行报错或超时等情况，直接返回空列表，由上层根据 error 处理
+                return []
+            
+            if not flag:
+                # 查询执行失败
+                return []
+
+            # 确保 cypher_response 是列表
+            if not isinstance(cypher_response, list):
                 return []
 
             records = []
@@ -92,10 +101,14 @@ class CypherAgent(Agent):
                 try:
                     if hasattr(record, 'data'):
                         row = record.data()
+                    elif isinstance(record, dict):
+                        row = record
                     else:
-                        row = dict(record)
-                except Exception:
-                    row = {'_raw': process_string(str(record))}
+                        # 尝试转换为 dict
+                        row = dict(record) if hasattr(record, '__iter__') and not isinstance(record, str) else {'_raw': str(record)}
+                except Exception as e:
+                    # 如果转换失败，记录原始内容
+                    row = {'_raw': process_string(str(record)), '_error': str(e)}
                 records.append(row)
 
             return records

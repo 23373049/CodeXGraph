@@ -328,24 +328,42 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
     def find_references(self, keyword):
         """查找引用关系：查找与目标实体通过常见引用/调用关系相连的节点，并返回节点与关系信息。"""
         # 匹配 CALLS / USES / DEPENDS_ON 等关系（如果图模型使用不同关系名，需调整）
+        # 返回引用者（caller）的信息，包括 code 字段，便于后续使用
         return (
-            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' \\n"
-            "MATCH (a)-[r]->(t) RETURN labels(a) AS from_labels, a.name AS from_name, type(r) AS rel, labels(t) AS to_labels, t.name AS to_name, t.file_path AS to_file"
+            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
+            "MATCH (a)-[r]->(t) "
+            "RETURN labels(a) AS node_type, "
+            "a.name AS name, "
+            "a.file_path AS file_path, "
+            "a.signature AS signature, "
+            "a.code AS code, "
+            "type(r) AS rel, "
+            "t.name AS to_name, "
+            "t.file_path AS to_file"
         )
 
     def find_call_hierarchy(self, keyword):
         """查找调用层级：返回与目标实体相关的上游调用者（callers）和下游被调用者（callees）。
-        默认只展开 1..2 层 CALLS 关系以避免结果爆炸。"""
-        # 尝试同时匹配 CALLS 和 USES 两种常见的调用/依赖关系，兼容不同图模型
-        # 注意：某些 Cypher 引擎对 [:TYPE1|TYPE2*min..max] 的语法支持可能不同，
-        # 若执行报错，可改为分别查询或使用 WHERE type(r) IN [...] 形式。
+        默认只展开 1..2 层 CALLS 关系以避免结果爆炸。
+        返回扁平化的结果，每条记录代表一个相关节点，便于后续处理。"""
+        # 使用 UNION 将调用者和被调用者合并为扁平结构，统一字段名
         return (
             f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
-            "OPTIONAL MATCH (caller)-[r1:CALLS|USES*1..2]->(t) "
-            "OPTIONAL MATCH (t)-[r2:CALLS|USES*1..2]->(callee) "
-            "RETURN DISTINCT labels(t) AS target_labels, t.name AS target_name, t.file_path AS target_file, "
-            "collect(DISTINCT {from_labels: labels(caller), from_name: caller.name, rel: type(r1)}) AS callers, "
-            "collect(DISTINCT {to_labels: labels(callee), to_name: callee.name, rel: type(r2)}) AS callees"
+            # 返回目标节点本身
+            "RETURN labels(t) AS node_type, t.name AS name, t.file_path AS file_path, "
+            "t.signature AS signature, t.code AS code, 'TARGET' AS rel_type "
+            "UNION ALL "
+            # 返回调用者（callers）
+            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
+            "MATCH (caller)-[r1:CALLS|USES]->(t) "
+            "RETURN labels(caller) AS node_type, caller.name AS name, caller.file_path AS file_path, "
+            "caller.signature AS signature, caller.code AS code, type(r1) AS rel_type "
+            "UNION ALL "
+            # 返回被调用者（callees）
+            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
+            "MATCH (t)-[r2:CALLS|USES]->(callee) "
+            "RETURN labels(callee) AS node_type, callee.name AS name, callee.file_path AS file_path, "
+            "callee.signature AS signature, callee.code AS code, type(r2) AS rel_type"
         )
 
     def question_to_cypher(self, question: str) -> str:
@@ -516,6 +534,21 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                     cypher_query,
                     retries=self.max_iterations_cypher,
                     structured=True)
+                
+                # 确保 query_result 是列表类型
+                if not isinstance(query_result, list):
+                    logger.warning(f"[Step {step_id}.{idx+1}] query_result is not a list, type: {type(query_result)}, value: {query_result}")
+                    query_result = []
+                
+                # 记录调试信息
+                logger.debug(f"[Step {step_id}.{idx+1}] Tool {tool_name} returned {len(query_result)} records")
+                if query_result and len(query_result) > 0:
+                    sample = query_result[0]
+                    logger.debug(f"[Step {step_id}.{idx+1}] Sample record keys: {list(sample.keys()) if isinstance(sample, dict) else type(sample)}")
+                    if isinstance(sample, dict):
+                        has_code = 'code' in sample and sample.get('code')
+                        logger.debug(f"[Step {step_id}.{idx+1}] Sample record has 'code' field: {has_code}")
+                
                 step_results.append({
                     'tool': tool_name,
                     'result': query_result,
@@ -524,10 +557,22 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 
                 # 可视化结果
                 try:
-                    result_str = str(query_result)[:1000]
+                    if isinstance(query_result, list) and len(query_result) > 0:
+                        # 显示前几个记录的摘要
+                        preview_items = []
+                        for i, item in enumerate(query_result[:3]):
+                            if isinstance(item, dict):
+                                name = item.get('name', item.get('from_name', 'N/A'))
+                                file_path = item.get('file_path', 'N/A')
+                                has_code = 'code' in item and bool(item.get('code'))
+                                preview_items.append(f"  [{i+1}] {name} ({file_path}) [code: {'✓' if has_code else '✗'}]")
+                        result_str = f"找到 {len(query_result)} 个结果:\n" + "\n".join(preview_items)
+                    else:
+                        result_str = f"找到 {len(query_result) if isinstance(query_result, list) else 0} 个结果"
                     self.update_agent_message(f"[Step {step_id}.{idx+1} Result] {result_str}")
-                except Exception:
-                    logger.debug("Step %d.%d result: %s", step_id, idx+1, str(query_result)[:200])
+                except Exception as e:
+                    logger.debug("Step %d.%d result formatting failed: %s", step_id, idx+1, str(e))
+                    self.update_agent_message(f"[Step {step_id}.{idx+1} Result] {len(query_result) if isinstance(query_result, list) else 0} records")
             except Exception as e:
                 logger.exception(f"Tool execution failed: {tool_name}")
                 step_results.append({
@@ -605,8 +650,9 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                         # 显示前几个结果的详细信息，包括代码片段
                         for i, item in enumerate(result[:5]):  # 增加到5个结果
                             if isinstance(item, dict):
-                                name = item.get('name', item.get('from_name', ''))
-                                file_path = item.get('file_path', '')
+                                # 统一字段提取逻辑，与 generate_fix_solution 保持一致
+                                name = item.get('name', item.get('from_name', item.get('target_name', '')))
+                                file_path = item.get('file_path', item.get('to_file', item.get('target_file', '')))
                                 signature = item.get('signature', '')
                                 code = item.get('code', '')
                                 collected_info += f"    [{i+1}] {name} ({file_path})\n"
@@ -850,37 +896,53 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             for tool_result in exec_result.get('results', []):
                 if tool_result.get('result') and not tool_result.get('error'):
                     result = tool_result.get('result')
+                    
+                    # 添加调试日志
+                    logger.debug(f"[generate_fix_solution] Processing tool_result, result type: {type(result)}")
+                    
                     if isinstance(result, list):
-                        for item in result:
-                            if isinstance(item, dict):
-                                # 使用节点名和文件路径作为唯一标识
-                                node_name = item.get('name', item.get('from_name', ''))
-                                node_file = item.get('file_path', '')
-                                node_key = f"{node_file}::{node_name}"
+                        logger.debug(f"[generate_fix_solution] Result is list with {len(result)} items")
+                        for idx, item in enumerate(result):
+                            if not isinstance(item, dict):
+                                logger.warning(f"[generate_fix_solution] Item {idx} is not a dict, type: {type(item)}, value: {item}")
+                                continue
+                            
+                            # 使用节点名和文件路径作为唯一标识
+                            node_name = item.get('name', item.get('from_name', item.get('target_name', '')))
+                            node_file = item.get('file_path', item.get('to_file', item.get('target_file', '')))
+                            node_key = f"{node_file}::{node_name}"
 
-                                # 统一字段提取
-                                code = item.get('code', '')
-                                signature = item.get('signature', '')
-                                node_type = item.get('node_type', '')
+                            # 统一字段提取
+                            code = item.get('code', '')
+                            signature = item.get('signature', '')
+                            node_type = item.get('node_type', item.get('from_labels', item.get('to_labels', item.get('target_labels', ''))))
 
-                                # 有 code 的优先收集到代码节点列表
-                                if code and node_key not in seen_nodes:
+                            # 调试日志：记录每个节点的 code 字段情况
+                            if idx < 3:  # 只记录前3个，避免日志过多
+                                logger.debug(f"[generate_fix_solution] Item {idx}: name={node_name}, file={node_file}, has_code={bool(code)}, code_length={len(code) if code else 0}")
+
+                            # 有 code 的优先收集到代码节点列表
+                            if code and node_key not in seen_nodes:
+                                seen_nodes.add(node_key)
+                                collected_code_nodes.append({
+                                    'name': node_name,
+                                    'file_path': node_file,
+                                    'code': code,
+                                    'signature': signature,
+                                    'node_type': node_type
+                                })
+                            # 没有 code 但有基本信息的，收集到 meta-only 列表，便于提供上下文
+                            elif (node_name or node_file) and not code:
+                                if node_key not in seen_nodes:  # meta-only 节点也要去重
                                     seen_nodes.add(node_key)
-                                    collected_code_nodes.append({
-                                        'name': node_name,
-                                        'file_path': node_file,
-                                        'code': code,
-                                        'signature': signature,
-                                        'node_type': node_type
-                                    })
-                                # 没有 code 但有基本信息的，收集到 meta-only 列表，便于提供上下文
-                                elif (node_name or node_file) and not code:
                                     collected_meta_only_nodes.append({
                                         'name': node_name,
                                         'file_path': node_file,
                                         'signature': signature,
                                         'node_type': node_type
                                     })
+                    else:
+                        logger.warning(f"[generate_fix_solution] Result is not a list, type: {type(result)}, value: {str(result)[:200]}")
         
         # 根据bug定位结果，对代码节点进行优先级排序
         # 提取bug定位结果中提到的函数名/类名关键词
