@@ -13,6 +13,29 @@ from modelscope_agent.agents.codexgraph_agent.utils.prompt_utils import (
 from modelscope_agent.environment.graph_database import GraphDatabaseHandler
 import logging
 
+
+def escape_cypher_string(value: str) -> str:
+    """
+    转义 Cypher 查询字符串中的特殊字符，防止注入攻击。
+    将单引号转义为双单引号，这是 Cypher 的标准转义方式。
+    """
+    if not isinstance(value, str):
+        return str(value)
+    # Cypher 使用单引号转义：' -> ''
+    return value.replace("'", "''")
+
+
+def escape_cypher_label(value: str) -> str:
+    """
+    转义 Cypher 标签中的特殊字符。
+    标签不能包含某些特殊字符，需要验证或转义。
+    """
+    if not isinstance(value, str):
+        return str(value)
+    # 移除或转义标签中的特殊字符
+    # 标签通常只允许字母、数字、下划线
+    return re.sub(r'[^a-zA-Z0-9_]', '_', value)
+
 logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = """You are a software developer maintaining a large project.
@@ -283,6 +306,11 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
 
     def find_nodes_in_file(self, keyword):
         # 返回统一字段名，便于后续直接使用：node_type / name / file_path / signature / code
+        # 修复：转义特殊字符防止注入
+        if not keyword or not keyword.strip():
+            logger.warning("find_nodes_in_file: empty keyword provided")
+            return "MATCH (n) WHERE 1=0 RETURN labels(n) AS node_type, n.name AS name, n.file_path AS file_path, n.signature AS signature, n.code AS code"
+        escaped_keyword = escape_cypher_string(keyword)
         return (
             "MATCH (n) WHERE n.file_path CONTAINS '{keyword}' "
             "RETURN labels(n) AS node_type, "
@@ -290,32 +318,49 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             "n.file_path AS file_path, "
             "n.signature AS signature, "
             "n.code AS code"
-        ).format(keyword=keyword)
+        ).format(keyword=escaped_keyword)
 
     def find_class_by_keyword(self, keyword):
         labels = self._label_map()
         class_label = labels.get('class_label', 'CLASS')
+        # 修复：转义特殊字符防止注入
+        if not keyword or not keyword.strip():
+            logger.warning("find_class_by_keyword: empty keyword provided")
+            return f"MATCH (c:{class_label}) WHERE 1=0 RETURN c.name AS name, c.file_path AS file_path, c.signature AS signature, c.code AS code"
+        escaped_label = escape_cypher_label(class_label)
+        escaped_keyword = escape_cypher_string(keyword)
         return (
             "MATCH (c:{class_label}) WHERE c.name CONTAINS '{keyword}' "
             "RETURN c.name AS name, "
             "c.file_path AS file_path, "
             "c.signature AS signature, "
             "c.code AS code"
-        ).format(class_label=class_label, keyword=keyword)
+        ).format(class_label=escaped_label, keyword=escaped_keyword)
 
     def find_function_by_keyword(self, keyword):
         labels = self._label_map()
         method_label = labels.get('method_label', 'FUNCTION')
+        # 修复：转义特殊字符防止注入
+        if not keyword or not keyword.strip():
+            logger.warning("find_function_by_keyword: empty keyword provided")
+            return f"MATCH (f:{method_label}) WHERE 1=0 RETURN f.name AS name, f.file_path AS file_path, f.signature AS signature, f.code AS code"
+        escaped_label = escape_cypher_label(method_label)
+        escaped_keyword = escape_cypher_string(keyword)
         return (
             "MATCH (f:{method_label}) WHERE f.name CONTAINS '{keyword}' "
             "RETURN f.name AS name, "
             "f.file_path AS file_path, "
             "f.signature AS signature, "
             "f.code AS code"
-        ).format(method_label=method_label, keyword=keyword)
+        ).format(method_label=escaped_label, keyword=escaped_keyword)
 
     def introduce_entity(self, keyword):
         # 为统一起见，这里也返回 signature 字段（即使某些节点可能没有该属性）
+        # 修复：转义特殊字符防止注入
+        if not keyword or not keyword.strip():
+            logger.warning("introduce_entity: empty keyword provided")
+            return "MATCH (n) WHERE 1=0 RETURN labels(n) AS node_type, n.name AS name, n.file_path AS file_path, n.signature AS signature, n.code AS code"
+        escaped_keyword = escape_cypher_string(keyword)
         return (
             "MATCH (n) WHERE n.name CONTAINS '{keyword}' "
             "RETURN labels(n) AS node_type, "
@@ -323,14 +368,19 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             "n.file_path AS file_path, "
             "n.signature AS signature, "
             "n.code AS code"
-        ).format(keyword=keyword)
+        ).format(keyword=escaped_keyword)
 
     def find_references(self, keyword):
         """查找引用关系：查找与目标实体通过常见引用/调用关系相连的节点，并返回节点与关系信息。"""
         # 匹配 CALLS / USES / DEPENDS_ON 等关系（如果图模型使用不同关系名，需调整）
         # 返回引用者（caller）的信息，包括 code 字段，便于后续使用
+        # 修复：转义特殊字符防止注入
+        if not keyword or not keyword.strip():
+            logger.warning("find_references: empty keyword provided")
+            return "MATCH (t) WHERE 1=0 MATCH (a)-[r]->(t) RETURN labels(a) AS node_type, a.name AS name, a.file_path AS file_path, a.signature AS signature, a.code AS code, type(r) AS rel, t.name AS to_name, t.file_path AS to_file"
+        escaped_keyword = escape_cypher_string(keyword)
         return (
-            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
+            f"MATCH (t) WHERE t.name CONTAINS '{escaped_keyword}' "
             "MATCH (a)-[r]->(t) "
             "RETURN labels(a) AS node_type, "
             "a.name AS name, "
@@ -347,20 +397,25 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         默认只展开 1..2 层 CALLS 关系以避免结果爆炸。
         返回扁平化的结果，每条记录代表一个相关节点，便于后续处理。"""
         # 使用 UNION 将调用者和被调用者合并为扁平结构，统一字段名
+        # 修复：转义特殊字符防止注入
+        if not keyword or not keyword.strip():
+            logger.warning("find_call_hierarchy: empty keyword provided")
+            return "MATCH (t) WHERE 1=0 RETURN labels(t) AS node_type, t.name AS name, t.file_path AS file_path, t.signature AS signature, t.code AS code, 'TARGET' AS rel_type"
+        escaped_keyword = escape_cypher_string(keyword)
         return (
-            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
+            f"MATCH (t) WHERE t.name CONTAINS '{escaped_keyword}' "
             # 返回目标节点本身
             "RETURN labels(t) AS node_type, t.name AS name, t.file_path AS file_path, "
             "t.signature AS signature, t.code AS code, 'TARGET' AS rel_type "
             "UNION ALL "
             # 返回调用者（callers）
-            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
+            f"MATCH (t) WHERE t.name CONTAINS '{escaped_keyword}' "
             "MATCH (caller)-[r1:CALLS|USES]->(t) "
             "RETURN labels(caller) AS node_type, caller.name AS name, caller.file_path AS file_path, "
             "caller.signature AS signature, caller.code AS code, type(r1) AS rel_type "
             "UNION ALL "
             # 返回被调用者（callees）
-            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
+            f"MATCH (t) WHERE t.name CONTAINS '{escaped_keyword}' "
             "MATCH (t)-[r2:CALLS|USES]->(callee) "
             "RETURN labels(callee) AS node_type, callee.name AS name, callee.file_path AS file_path, "
             "callee.signature AS signature, callee.code AS code, type(r2) AS rel_type"
@@ -372,20 +427,32 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         根据当前 agent 的语言（self.language）调整图谱标签映射（例如 C 使用 STRUCT/FILE）。
         """
         kw = question.strip().strip('\"\'')
+        # 修复：转义特殊字符防止注入
+        if not kw:
+            logger.warning("question_to_cypher: empty question provided")
+            return "MATCH (n) WHERE 1=0 RETURN labels(n) AS node_type, n.name AS name, n.file_path AS file_path, n.signature AS signature, n.code AS code"
+        escaped_kw = escape_cypher_string(kw)
         # 构造通用的匹配查询：匹配 name 字段包含关键字的任意节点
         cypher = (
-            f"MATCH (n) WHERE toLower(coalesce(n.name, '')) CONTAINS toLower('{kw}') "
+            f"MATCH (n) WHERE toLower(coalesce(n.name, '')) CONTAINS toLower('{escaped_kw}') "
             "RETURN labels(n) AS node_type, n.name AS name, n.file_path AS file_path, n.signature AS signature, n.code AS code"
         )
         return cypher
 
-    def generate_debug_plan(self, user_query: str, file_path: str = '') -> dict:
+    def generate_debug_plan(self, user_query: str, file_path: str = '', file_path_str: str = '') -> dict:
         """
         生成 Debug 计划：分析问题并制定结构化的多步骤调试计划。
         返回包含步骤列表的计划字典。
+        
+        Args:
+            user_query: 用户查询
+            file_path: 原始文件路径
+            file_path_str: 格式化后的文件路径（用于显示）
         """
-        if file_path:
-            issue_context = f'<issue>\n{file_path}{user_query}\n</issue>\n'
+        # 使用格式化后的 file_path_str 如果提供，否则使用原始 file_path
+        display_path = file_path_str if file_path_str else (f'`file_path`: `{file_path}`\n' if file_path else '')
+        if display_path:
+            issue_context = f'<issue>\n{display_path}{user_query}\n</issue>\n'
         else:
             issue_context = f'<issue>\n{user_query}\n</issue>\n'
         
@@ -496,14 +563,35 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         
         step_results = []
         
+        # 修复：验证 tools 和 tool_args 的类型
+        if not isinstance(tools, list):
+            logger.warning(f"Step {step_id}: tools is not a list, type: {type(tools)}")
+            tools = []
+        if not isinstance(tool_args, list) and tool_args is not None:
+            logger.warning(f"Step {step_id}: tool_args is not a list, type: {type(tool_args)}")
+            tool_args = []
+        
         # 执行该步骤中的所有工具调用
         # 确保 tools 和 tool_args 长度匹配
-        min_len = min(len(tools), len(tool_args)) if tool_args else len(tools)
+        # 修复：正确处理空列表和 None 的情况
+        if not tool_args or len(tool_args) == 0:
+            # 如果没有提供 tool_args，为每个 tool 创建空的参数字典
+            min_len = len(tools)
+            tool_args = [{}] * min_len
+        else:
+            min_len = min(len(tools), len(tool_args))
+        
+        # 修复：如果 tools 为空，记录警告
+        if len(tools) == 0:
+            logger.warning(f"Step {step_id}: tools list is empty")
+        
         for idx in range(min_len):
             tool_name = tools[idx]
             tool_arg = tool_args[idx] if idx < len(tool_args) else {}
             
-            if tool_name not in [f['name'] for f in self.FUNCTIONS]:
+            # 修复：优化性能，避免重复生成列表
+            valid_tool_names = {f['name'] for f in self.FUNCTIONS}
+            if tool_name not in valid_tool_names:
                 logger.warning(f"Unknown tool: {tool_name}")
                 step_results.append({
                     'tool': tool_name,
@@ -540,6 +628,15 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                     logger.warning(f"[Step {step_id}.{idx+1}] query_result is not a list, type: {type(query_result)}, value: {query_result}")
                     query_result = []
                 
+                # 修复：验证列表中每个元素都是 dict 类型
+                validated_result = []
+                for record in query_result:
+                    if isinstance(record, dict):
+                        validated_result.append(record)
+                    else:
+                        logger.warning(f"[Step {step_id}.{idx+1}] Record is not a dict, type: {type(record)}, value: {str(record)[:100]}")
+                query_result = validated_result
+                
                 # 记录调试信息
                 logger.debug(f"[Step {step_id}.{idx+1}] Tool {tool_name} returned {len(query_result)} records")
                 if query_result and len(query_result) > 0:
@@ -562,8 +659,9 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                         preview_items = []
                         for i, item in enumerate(query_result[:3]):
                             if isinstance(item, dict):
-                                name = item.get('name', item.get('from_name', 'N/A'))
-                                file_path = item.get('file_path', 'N/A')
+                                # 修复：添加 to_name 和 to_file 的 fallback
+                                name = item.get('name', item.get('from_name', item.get('target_name', item.get('to_name', 'N/A'))))
+                                file_path = item.get('file_path', item.get('to_file', item.get('target_file', 'N/A')))
                                 has_code = 'code' in item and bool(item.get('code'))
                                 preview_items.append(f"  [{i+1}] {name} ({file_path}) [code: {'✓' if has_code else '✗'}]")
                         result_str = f"找到 {len(query_result)} 个结果:\n" + "\n".join(preview_items)
@@ -651,7 +749,8 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                         for i, item in enumerate(result[:5]):  # 增加到5个结果
                             if isinstance(item, dict):
                                 # 统一字段提取逻辑，与 generate_fix_solution 保持一致
-                                name = item.get('name', item.get('from_name', item.get('target_name', '')))
+                                # 修复：添加 to_name 和 to_file 的 fallback
+                                name = item.get('name', item.get('from_name', item.get('target_name', item.get('to_name', ''))))
                                 file_path = item.get('file_path', item.get('to_file', item.get('target_file', '')))
                                 signature = item.get('signature', '')
                                 code = item.get('code', '')
@@ -698,20 +797,21 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         """
         self.chat_history = []
 
-        # 格式化文件路径
+        # 格式化文件路径（用于显示）
         file_path_str = f'`file_path`: `{file_path}`\n' if file_path else ''
 
         # 阶段1: 生成 Debug 计划
         try:
-            debug_plan = self.generate_debug_plan(user_query, file_path_str)
+            # 传递原始 file_path 和格式化后的 file_path_str
+            debug_plan = self.generate_debug_plan(user_query, file_path, file_path_str)
         except Exception as e:
             logger.exception("Failed to generate debug plan, falling back to simple flow")
             # 如果计划生成失败，回退到简单流程
-            return self._run_simple_flow(user_query, file_path_str)
+            return self._run_simple_flow(user_query, file_path)
 
         if not debug_plan.get('steps'):
             logger.warning("Empty debug plan, falling back to simple flow")
-            return self._run_simple_flow(user_query, file_path_str)
+            return self._run_simple_flow(user_query, file_path)
 
         # 阶段2: 执行计划
         execution_results = []
@@ -719,10 +819,45 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
         
         # 按依赖关系排序执行步骤
         steps = debug_plan.get('steps', [])
-        remaining_steps = {step['step_id']: step for step in steps}
+        # 修复：检查 step_id 重复，避免数据丢失
+        step_ids_seen = set()
+        duplicate_step_ids = []
+        for step in steps:
+            step_id = step.get('step_id')
+            if step_id in step_ids_seen:
+                duplicate_step_ids.append(step_id)
+            else:
+                step_ids_seen.add(step_id)
+        
+        if duplicate_step_ids:
+            logger.warning(f"发现重复的 step_id: {duplicate_step_ids}，将重新分配 step_id")
+            # 重新分配 step_id，避免重复
+            step_id_map = {}  # 旧 step_id -> 新 step_id 的映射
+            new_steps = []
+            for idx, step in enumerate(steps):
+                original_step_id = step.get('step_id', idx + 1)
+                if original_step_id in step_id_map:
+                    # 如果重复，使用索引作为新的 step_id
+                    new_step_id = idx + 1
+                    step_id_map[original_step_id] = new_step_id
+                else:
+                    new_step_id = original_step_id
+                    step_id_map[original_step_id] = new_step_id
+                
+                # 更新 step 的 step_id 和 depends_on
+                step_copy = step.copy()
+                step_copy['step_id'] = new_step_id
+                # 更新 depends_on 中的 step_id
+                if 'depends_on' in step_copy and step_copy['depends_on']:
+                    step_copy['depends_on'] = [step_id_map.get(dep_id, dep_id) for dep_id in step_copy['depends_on']]
+                new_steps.append(step_copy)
+            steps = new_steps
+        
+        remaining_steps = {step.get('step_id'): step for step in steps}
         
         max_plan_iterations = len(steps) * 2  # 防止无限循环
         iteration = 0
+        last_ready_count = -1  # 用于检测循环依赖
         
         while remaining_steps and iteration < max_plan_iterations:
             iteration += 1
@@ -732,9 +867,21 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 if not step.get('depends_on') or all(dep_id in executed_step_ids for dep_id in step.get('depends_on', []))
             ]
             
-            if not ready_steps:
-                # 如果没有可执行的步骤，可能是依赖关系有问题，尝试执行所有剩余步骤
-                ready_steps = list(remaining_steps.values())
+            # 修复：检测循环依赖
+            if len(ready_steps) == 0:
+                # 如果没有可执行的步骤，检查是否是循环依赖
+                if last_ready_count == 0:
+                    logger.error(f"检测到循环依赖或无法解决的依赖关系。剩余步骤: {list(remaining_steps.keys())}")
+                    # 尝试执行所有剩余步骤（忽略依赖）
+                    ready_steps = list(remaining_steps.values())
+                    if not ready_steps:
+                        break
+                else:
+                    last_ready_count = 0
+                    # 再试一次，可能是依赖关系还没满足
+                    continue
+            else:
+                last_ready_count = len(ready_steps)
             
             # 执行所有就绪的步骤
             for step in ready_steps:
@@ -908,14 +1055,27 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                                 continue
                             
                             # 使用节点名和文件路径作为唯一标识
-                            node_name = item.get('name', item.get('from_name', item.get('target_name', '')))
+                            # 修复：添加 to_name 和 to_file 的 fallback（find_references 返回这些字段）
+                            node_name = item.get('name', item.get('from_name', item.get('target_name', item.get('to_name', ''))))
                             node_file = item.get('file_path', item.get('to_file', item.get('target_file', '')))
-                            node_key = f"{node_file}::{node_name}"
-
+                            
                             # 统一字段提取
                             code = item.get('code', '')
                             signature = item.get('signature', '')
                             node_type = item.get('node_type', item.get('from_labels', item.get('to_labels', item.get('target_labels', ''))))
+                            
+                            # 修复：生成唯一标识符，优先使用 name+file_path，如果没有则使用 code 的前100字符
+                            # 这样可以避免丢失有 code 但没有 name/file_path 的有效节点
+                            if node_name or node_file:
+                                node_key = f"{node_file}::{node_name}"
+                            elif code:
+                                # 使用 code 的前100字符作为标识（对于没有 name/file_path 但有 code 的节点）
+                                code_preview = code[:100].replace('\n', ' ').replace('::', '_')
+                                node_key = f"_code_only::{code_preview}"
+                            else:
+                                # 既没有 name/file_path 也没有 code，这个节点没有有用信息，跳过
+                                logger.warning(f"[generate_fix_solution] Item {idx} has no name, file_path, or code, skipping")
+                                continue
 
                             # 调试日志：记录每个节点的 code 字段情况
                             if idx < 3:  # 只记录前3个，避免日志过多
