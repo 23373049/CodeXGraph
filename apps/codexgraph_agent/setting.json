@@ -16,15 +16,15 @@
         ],
         "project_id": "test",
         "env_path_dict": {
-            "env_path": "D:\\Anaconda\\envs\\mybuild\\python.exe",
-            "working_directory": "D:\\GitHub\\CodeXGraph\\ms-agent\\modelscope_agent\\environment\\graph_database\\indexer"
+            "env_path": "D:\\miniconda3\\envs\\index_build\\python.exe",
+            "working_directory": "D:\\GitHub\\CodeXGraph\\modelscope_agent\\environment\\graph_database\\indexer"
         },
         "neo4j": {
             "url": "bolt://localhost:7687",
             "user": "neo4j",
-            "password": "neo4j1231",
-            "database_name": "neo4j"
+            "password": "password",
+            "database_name": "codexgraph"
         },
-        "language": "C"
+        "language": "Python"
     }
 }

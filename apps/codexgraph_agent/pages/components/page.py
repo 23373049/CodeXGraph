@@ -44,7 +44,7 @@ def get_llm_config(llm_name):
     if llm_name == 'deepseek-coder':
         llm_config = {
             'model': 'deepseek-coder',
-            'api_base': 'https://jeniya.top/v1',
+            'api_base': 'https://api.deepseek.com',
             'api_key': api_key,
             'model_server': 'openai'
         }

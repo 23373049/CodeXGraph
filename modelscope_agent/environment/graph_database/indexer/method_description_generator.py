@@ -154,17 +154,11 @@ class MethodDescriptionGenerator:
     
     def _call_llm(self, prompt: str) -> str:
         """调用大模型API"""
-        # 检查是否有有效的API key
-        api_key = self.llm_config.get('api_key', '').strip()
-        if not api_key or api_key == 'sk-aabc879cff054d9fac7025eb491ef163':
-            print(f"警告: 未配置有效的API Key，自动使用模拟描述生成")
-            return self._generate_mock_description(prompt)
-        
         try:
             print(f"尝试调用LLM API...")
             print(f"模型: {self.llm_config['model_name']}")
             print(f"API Base: {self.llm_config['base_url']}")
-            print(f"API Key: {api_key[:10]}...")
+            print(f"API Key: {self.llm_config['api_key'][:10]}..." if self.llm_config['api_key'] else "无API Key")
             
             # 使用统一的LLM调用方式，兼容不同的API
             from modelscope_agent.llm import get_chat_model
@@ -173,7 +167,7 @@ class MethodDescriptionGenerator:
             llm_config = {
                 'model': self.llm_config['model_name'],
                 'api_base': self.llm_config['base_url'],
-                'api_key': api_key,
+                'api_key': self.llm_config['api_key'],
                 'model_server': 'openai'
             }
             
@@ -183,7 +177,7 @@ class MethodDescriptionGenerator:
             llm = get_chat_model(
                 model=self.llm_config['model_name'],
                 model_server='openai',
-                api_key=api_key,
+                api_key=self.llm_config['api_key'],
                 api_base=self.llm_config['base_url']
             )
             print(f"LLM实例创建成功: {type(llm)}")
@@ -207,18 +201,11 @@ class MethodDescriptionGenerator:
             print(f"警告: 未安装相关库，使用模拟描述: {e}")
             return self._generate_mock_description(prompt)
         except Exception as e:
-            error_str = str(e)
-            # 检查是否是认证错误
-            if 'Authentication' in error_str or '401' in error_str or 'Unauthorized' in error_str:
-                print(f"警告: API认证失败，自动降级到模拟描述生成。错误: {error_str}")
-                return self._generate_mock_description(prompt)
-            else:
-                print(f"调用大模型API失败: {e}")
-                import traceback
-                traceback.print_exc()
-                # 对于其他错误，也使用模拟描述而不是返回错误信息
-                print(f"自动使用模拟描述作为备选方案")
-                return self._generate_mock_description(prompt)
+            print(f"调用大模型API失败: {e}")
+            import traceback
+            traceback.print_exc()
+            # 返回包含错误信息的描述
+            return f"LLM调用失败: {str(e)}"
     
     def _generate_mock_description(self, prompt: str) -> str:
         """生成模拟描述（用于测试）"""

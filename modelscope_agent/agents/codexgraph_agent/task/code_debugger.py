@@ -67,25 +67,6 @@ def markdown_answer(answer):
     return answer
 
 
-def is_empty_cypher_result(result) -> bool:
-    """
-    检查 Cypher 查询结果是否为空（返回 None）。
-    
-    Args:
-        result: Cypher 查询的返回结果，可能是字符串、列表或其他类型
-        
-    Returns:
-        bool: 如果结果为空（包含 'Cypher query Return None'），返回 True；否则返回 False
-    """
-    if result is None:
-        return True
-    if isinstance(result, str):
-        return 'Cypher query Return None' in result
-    if isinstance(result, list):
-        return len(result) == 0
-    return False
-
-
 class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
 
     def __init__(self,
@@ -503,20 +484,6 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
             
             try:
                 query_result = self.cypher_agent.run(cypher_query, retries=self.max_iterations_cypher)
-                
-                # 检查并过滤掉返回 None 的 Cypher 查询结果
-                if is_empty_cypher_result(query_result):
-                    step_results.append({
-                        'tool': tool_name,
-                        'result': None,
-                        'error': 'Cypher query returned no results'
-                    })
-                    try:
-                        self.update_agent_message(f"[Step {step_id}.{idx+1} Result] 查询无结果，已跳过")
-                    except Exception:
-                        logger.debug("Step %d.%d: query returned None, skipped", step_id, idx+1)
-                    continue
-                
                 step_results.append({
                     'tool': tool_name,
                     'result': query_result,
@@ -744,44 +711,30 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                 try:
                     user_response = self.cypher_agent.run(
                         cypher_query, retries=self.max_iterations_cypher)
-                    
-                    # 检查并过滤掉返回 None 的 Cypher 查询结果
-                    if is_empty_cypher_result(user_response):
-                        try:
-                            self.update_agent_message("[Filtered] 查询结果为空，已跳过")
-                        except Exception:
-                            logger.debug("Query returned None, skipped")
-                        # 如果查询结果为空，继续执行后续流程，不返回空结果
-                        user_response = None
-                    
-                    if user_response is None:
-                        # 如果查询结果为空，继续执行原有的迭代流程
-                        pass
+                    node_info = "\n【节点详细信息】\n"
+                    if isinstance(user_response, list):
+                        for node in user_response:
+                            node_info += (
+                                f"类型: {node.get('node_type', '')}\n"
+                                f"名称: {node.get('name', '')}\n"
+                                f"路径: {node.get('file_path', '')}\n"
+                                f"签名: {node.get('signature', '')}\n"
+                                f"代码: {node.get('code', '')}\n\n"
+                            )
                     else:
-                        node_info = "\n【节点详细信息】\n"
-                        if isinstance(user_response, list):
-                            for node in user_response:
-                                node_info += (
-                                    f"类型: {node.get('node_type', '')}\n"
-                                    f"名称: {node.get('name', '')}\n"
-                                    f"路径: {node.get('file_path', '')}\n"
-                                    f"签名: {node.get('signature', '')}\n"
-                                    f"代码: {node.get('code', '')}\n\n"
-                                )
-                        else:
-                            node_info += str(user_response)
+                        node_info += str(user_response)
 
-                        try:
-                            self.update_agent_message(f"[Tool result] {str(user_response)[:2000]}")
-                        except Exception:
-                            logger.debug("Tool result: %s", user_response)
+                    try:
+                        self.update_agent_message(f"[Tool result] {str(user_response)[:2000]}")
+                    except Exception:
+                        logger.debug("Tool result: %s", user_response)
 
-                        try:
-                            analysis = self.llm_call([{'role': 'user', 'content': f'请基于以下查询结果做简明中文分析：\n{node_info}'}])
-                        except Exception:
-                            analysis = ''
+                    try:
+                        analysis = self.llm_call([{'role': 'user', 'content': f'请基于以下查询结果做简明中文分析：\n{node_info}'}])
+                    except Exception:
+                        analysis = ''
 
-                        return f"{node_info}\n【自动分析总结】\n{analysis}"
+                    return f"{node_info}\n【自动分析总结】\n{analysis}"
                 except Exception as e:
                     logger.exception("Simple flow execution failed")
                     return f"执行失败: {str(e)}"
@@ -878,14 +831,6 @@ class CodexGraphAgentDebugger(CodexGraphAgentGeneral):
                                 raw = json.dumps(raw, ensure_ascii=False, default=str)
                             except Exception:
                                 raw = str(raw)
-                        
-                        # 过滤掉返回 None 的 Cypher 查询结果，不发送给大模型
-                        if is_empty_cypher_result(raw):
-                            try:
-                                self.update_agent_message(f"[Filtered] 工具 {tool_result.get('tool')} 的查询结果为空，已跳过")
-                            except Exception:
-                                logger.debug("Filtered empty query result from tool: %s", tool_result.get('tool'))
-                            continue
 
                         content = f"[Tool: {tool_result.get('tool')}]\n{raw}"
                         messages.append({'role': 'user', 'content': content})
