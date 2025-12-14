@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 
 from modelscope_agent.agents.codexgraph_agent.prompt import JSON_PROMPT
@@ -112,6 +113,22 @@ class CodexGraphAgentCommenter(CodexGraphAgentGeneral):
                     }
                 },
                 "required": ["keyword"]
+            }
+        },
+        {
+            "name": "analyze_module",
+            "description": (
+                "分析指定模块（文件夹）的功能、包含的文件及文档，帮助理解模块层面的上下文。"
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "module_path": {
+                        "type": "string",
+                        "description": "模块或文件夹的路径，例如 src/utils 或 absolute/path/to/module"
+                    }
+                },
+                "required": ["module_path"]
             }
         },
     ]
@@ -252,6 +269,15 @@ class CodexGraphAgentCommenter(CodexGraphAgentGeneral):
             "to_name: callee.name, rel: type(r2)}) AS callees"
         )
 
+    def analyze_module(self, module_path):
+        path = module_path.replace("\\", "/")
+        return (
+            f"MATCH (n) WHERE n.file_path CONTAINS '{path}' "
+            "RETURN labels(n) AS type, n.name, n.file_path, "
+            "CASE WHEN n.file_path ENDS WITH 'README.md' OR n.file_path ENDS WITH 'README' THEN substring(n.code, 0, 2000) ELSE '' END AS readme_content "
+            "LIMIT 50"
+        )
+
     def _gather_context_messages(self, user_query: str) -> List[str]:
         """Optionally fetch context via tool calls; return extra messages."""
         context_messages: List[str] = []
@@ -337,11 +363,113 @@ class CodexGraphAgentCommenter(CodexGraphAgentGeneral):
 
         return context_messages
 
+    def _analyze_parent_module(self, file_path: str) -> str:
+        """Analyze the parent module of the given file."""
+        if not file_path:
+            return ""
+
+        parent_dir = os.path.dirname(file_path)
+        if not parent_dir or parent_dir == ".":
+            return ""
+
+        # Normalize path for Cypher query
+        normalized_parent = parent_dir.replace("\\", "/")
+        if not normalized_parent.endswith("/"):
+            normalized_parent += "/"
+
+        files = []
+        # Strategy 1: Exact match (STARTS WITH)
+        query = (
+            f"MATCH (n) WHERE n.file_path STARTS WITH '{normalized_parent}' "
+            "RETURN DISTINCT n.file_path AS name LIMIT 50"
+        )
+        
+        try:
+            # Use execute_query_with_timeout if available, or direct run
+            # Assuming execute_query_with_timeout returns (result, flag)
+            result, _ = self.graph_db.execute_query_with_timeout(query)
+            if isinstance(result, list):
+                files = [r['name'] for r in result if isinstance(r, dict) and 'name' in r]
+        except Exception as e:
+            logger.warning(f"Failed to query graph for parent module (Strategy 1): {e}")
+
+        # Strategy 2: Suffix match (CONTAINS) if Strategy 1 failed
+        # This handles cases where file_path is absolute but DB has relative paths
+        if not files:
+            parts = normalized_parent.strip("/").split("/")
+            # Use last 2 segments if available, e.g. "arch/aarch64/"
+            if len(parts) >= 2:
+                suffix = "/".join(parts[-2:]) + "/"
+                query = (
+                    f"MATCH (n) WHERE n.file_path CONTAINS '{suffix}' "
+                    "RETURN DISTINCT n.file_path AS name LIMIT 50"
+                )
+                try:
+                    result, _ = self.graph_db.execute_query_with_timeout(query)
+                    if isinstance(result, list):
+                        files = [r['name'] for r in result if isinstance(r, dict) and 'name' in r]
+                except Exception as e:
+                    logger.warning(f"Failed to query graph for parent module (Strategy 2): {e}")
+
+        # Strategy 3: Local file system fallback
+        if not files and os.path.exists(parent_dir):
+            try:
+                files = [
+                    os.path.join(parent_dir, f) for f in os.listdir(parent_dir)
+                    if os.path.isfile(os.path.join(parent_dir, f))
+                ]
+                # Limit to 50 files
+                files = files[:50]
+            except Exception as e:
+                logger.warning(f"Failed to list local files: {e}")
+
+        # Try to read README
+        readme_content = ""
+        for name in ["README.md", "README_CN.md", "readme.md", "README.txt", "README"]:
+            readme_path = os.path.join(parent_dir, name)
+            # Note: This assumes the agent has access to the file system at file_path
+            # If file_path is relative to workspace root, we might need to prepend workspace root
+            # But usually file_path passed here is relative to workspace.
+            if os.path.exists(readme_path):
+                try:
+                    with open(readme_path, 'r', encoding='utf-8') as f:
+                        readme_content = f.read(2000)  # Limit size
+                    break
+                except Exception:
+                    pass
+
+        if not files and not readme_content:
+            return ""
+
+        # Generate summary using LLM
+        prompt = (
+            f"正在分析文件 {file_path} 的上级模块 {parent_dir}。\n"
+            f"该模块包含以下文件（部分）：\n{', '.join(files)}\n"
+        )
+        if readme_content:
+            prompt += f"模块 README 内容摘要：\n{readme_content}\n"
+
+        prompt += "\n请根据以上信息，对该模块的功能、作用及主要组成部分进行详细解释和总结，以便更好地理解模块内的代码。"
+
+        messages = [
+            {"role": "user", "content": prompt}
+        ]
+
+        try:
+            summary = self.llm_call(messages)
+            return f"### 上级模块 {parent_dir} 分析报告\n{summary}"
+        except Exception as e:
+            logger.warning(f"Failed to generate parent module summary: {e}")
+            return ""
+
     # ---------------------- main run loop ---------------------- #
     def _run(self, user_query: str, file_path: str = '', **kwargs) -> str:
         self.chat_history = []
 
         extra_messages = self._gather_context_messages(user_query)
+
+        # Add parent module analysis
+        parent_module_info = self._analyze_parent_module(file_path)
 
         if file_path:
             file_path = f'# file path: {file_path}'
@@ -364,6 +492,10 @@ class CodexGraphAgentCommenter(CodexGraphAgentGeneral):
         for msg in extra_messages:
             messages.append({'role': 'user', 'content': msg})
             self.update_user_message(msg)
+
+        if parent_module_info:
+            messages.append({'role': 'user', 'content': parent_module_info})
+            # self.update_agent_message(parent_module_info)  # Avoid overwriting by loop
 
         generate_msg = self.generate_message
 
@@ -410,9 +542,11 @@ class CodexGraphAgentCommenter(CodexGraphAgentGeneral):
         messages.append({'role': 'user', 'content': generate_queries})
         answer = self.llm_call(messages)
 
+        if parent_module_info:
+            answer = f"{parent_module_info}\n\n{answer}"
+
         self.update_user_message(generate_queries)
         self.update_agent_message(answer)
         messages.append({'role': 'assistant', 'content': answer})
 
         return answer
-

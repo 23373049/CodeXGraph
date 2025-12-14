@@ -1,15 +1,42 @@
-${message} Please add standardized Doxygen-style comments to the C code below:
+${message}
 
-### Code to be Annotated:
-```c
+### Task Decision:
+**CHECK YOUR CONVERSATION HISTORY.**
+1. **IF** you have retrieved a list of files/nodes from a directory (e.g., via a `CONTAINS` query on a path), you **MUST** generate **BOTH**:
+   - First, a **Module Analysis Report** (Option B).
+   - Second, **Code Annotations** for the specific input code (Option A).
+2. **ELSE** (if you only retrieved context for a single function/file), generate **Code Annotations** (Option A) only.
+
+### Input Code/Context:
+The user provided the following input (which may be a code snippet or a request):
+```text
 ${file_path}
 ${user_query}
 ```
 
 #### Final Output Format:
+
+**Option A (Code Annotation - Default for single file):**
 Return the fully annotated C code in a fenced block:
 ```c
 {code_with_annotations}
+```
+
+**Option B (Module Analysis Report - REQUIRED for directory analysis):**
+Return a Markdown report summarizing the module found in the context:
+```markdown
+# Module Analysis: [Directory Path]
+
+## 1. Overview
+[High-level summary of what this module/directory does based on the retrieved files]
+
+## 2. File Structure & Key Components
+- **[File Name]**: [Description of role/content]
+  - *Key Functions/Macros*: [List important ones]
+- **[File Name]**: ...
+
+## 3. Architecture & Relationships
+[Explain how these files interact (e.g., headers defining structs used in .c files)]
 ```
 
 #### Comment Requirements:
@@ -29,4 +56,3 @@ Example:
  * @return int 0 on success, negative errno code on failure.
  */
 ```
-

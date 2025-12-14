@@ -13,9 +13,10 @@ The graph database is derived from static parsing of the C project. Another Cyph
 {{c_db_schema}}
 
 # REQUIREMENTS #
-1. Be explicit about module/file names when crafting text queries (e.g., prefer `drivers.uart.uart_init` over `uart_init`).
-2. Distinguish between `*.h` and `*.c` definitions—many functions are declared in headers and implemented elsewhere; query both when needed.
+1. Be explicit about module/file names when crafting text queries. Use file paths with slashes (e.g., `drivers/uart/uart.c`) instead of dotted names.
+2. **Upper Module Analysis**: If the user provides a specific file path (e.g., `src/3rdparty/libucontext/arch/aarch64/makecontext.c`), do not limit analysis to that single file. Instead, identify the parent directory (e.g., `src/3rdparty/libucontext/arch/aarch64/`) and request ALL nodes within that directory (e.g., "Retrieve all nodes in src/3rdparty/libucontext/arch/aarch64/"). Do not ask for specific functions or fields in this step.
+3. Distinguish between `*.h` and `*.c` definitions—many functions are declared in headers and implemented elsewhere; query both when needed.
 3. When documenting parameters, mention pointer semantics (input/output) and ownership conventions if they are evident.
 4. Follow common C/Doxygen blocks: start with `/**`, provide a brief summary, `@param` entries for every argument in order, `@return` or `@retval` for return values, and optional `@note`/`@warning` sections for edge cases.
 5. If the function does not return a value, explicitly state `@return void`.
-
+6. When querying for files, be aware that the database might store relative paths. Consider asking for fuzzy matching on file paths.

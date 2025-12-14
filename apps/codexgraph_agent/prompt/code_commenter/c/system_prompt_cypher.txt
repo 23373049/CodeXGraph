@@ -7,7 +7,7 @@ You are a Cypher expert who helps the C code commenting assistant retrieve proje
 
 # CODE GRAPH DATABASE #
 The database captures modules (`MODULE`), translation units, functions, macros, structs, fields, and their relationships extracted from the C project.
+Note: `MODULE` nodes typically represent files. Their `name` or `file_path` attributes store the file path (e.g., "src/main.c"), NOT a dotted package name.
 
 # SCHEMA OF THE CODE GRAPH DATABASE #
 {{c_db_schema}}
-

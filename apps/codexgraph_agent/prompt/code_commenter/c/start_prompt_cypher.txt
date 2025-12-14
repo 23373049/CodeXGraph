@@ -28,9 +28,13 @@ Your response must follow:
 ```
 
 Guidelines:
-1. Prefer explicit module/file names (e.g., `drivers/uart/uart.c`) and include headers when relevant (`drivers/uart/uart.h`).
-2. Use nodes `MODULE`, `FUNCTION`, `STRUCT`, `FIELD`, `MACRO`, etc., and relationships like `CONTAINS`, `DECLARES`, `DEFINES`, `USES`, `INHERITS`.
-3. When locating symbols, attempt precise matching first (`WHERE m.name = 'foo/bar.c'`), then provide a fallback fuzzy match (`=~ '.*foo/bar.c'`) if necessary.
+1. Prefer explicit module/file names (e.g., `drivers/uart/uart.c`) and include headers when relevant (`drivers/uart/uart.h`). Do NOT convert file paths to dotted format (e.g., `drivers.uart.uart`). Always query `MODULE` nodes using `file_path` attribute with `ENDS WITH` or `CONTAINS` if the full path is uncertain.
+2. **Directory Queries**: When asked for all files/modules in a directory (e.g., `src/foo/bar/`), use `CONTAINS` on the `file_path` attribute. Do not restrict the node label to `MODULE` as some files might be represented by other nodes or you may need to retrieve functions/classes directly.
+   - Example: `MATCH (n) WHERE n.file_path CONTAINS 'src/foo/bar/' RETURN n`
+   - **CRITICAL**: Do NOT add filters on `name` (e.g., `n.name = '...'`) when the request is for *all* files in a directory. Just filter by `file_path`.
+3. Use nodes `MODULE`, `FUNCTION`, `STRUCT`, `FIELD`, `MACRO`, etc., and relationships like `CONTAINS`, `DECLARES`, `DEFINES`, `USES`, `INHERITS`.
+4. CRITICAL: The database stores relative paths (e.g., `src/main.c`). If the input contains an absolute path (e.g., `E:\project\src\main.c`), NEVER use equality (`=`). ALWAYS use `ENDS WITH` and normalize separators to forward slashes.
+   - BAD: `WHERE m.file_path = 'E:\project\src\main.c'`
+   - GOOD: `WHERE m.file_path ENDS WITH 'src/main.c'` or `WHERE m.file_path CONTAINS 'main.c'`
 4. Wrap optional relationships with `OPTIONAL MATCH` to avoid query failures when a symbol is missing.
 5. Highlight error handling or ambiguity in the decomposed text query description so the main assistant can interpret incomplete results correctly.
-

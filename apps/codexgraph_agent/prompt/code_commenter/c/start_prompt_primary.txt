@@ -62,4 +62,3 @@ Return JSON in the following format:
    - List all functions whose names contain `init` under module `os.kernel`.
 5. Only perform one action per round.
 6. Avoid issuing `ADD_COMMENTS` if you have not yet verified the function purpose or parameter meaning.
-
