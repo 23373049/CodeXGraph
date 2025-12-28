@@ -1,0 +1,7 @@
+{
+  "model": "deepseek-coder",
+  "api_base": "https://api.deepseek.com",
+  "api_key": "sk-ecad4fa9eb014adc83153479c9ff2a62",
+  "model_server": "openai",
+  "extra": {}
+}

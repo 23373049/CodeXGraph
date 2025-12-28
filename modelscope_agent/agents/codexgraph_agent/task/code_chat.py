@@ -1,9 +1,12 @@
 from copy import deepcopy
+import inspect
 
 from modelscope_agent.agents.codexgraph_agent.cypher_agent import \
     CODE_SEARCH_FORMAT
 from modelscope_agent.agents.codexgraph_agent.task.code_general import \
     CodexGraphAgentGeneral
+from modelscope_agent.agents.codexgraph_agent.task.function_shared import \
+    FunctionPlanningMixin
 from modelscope_agent.agents.codexgraph_agent.utils.code_utils import \
     extract_text_between_markers
 from modelscope_agent.agents.codexgraph_agent.utils.prompt_utils import \
@@ -57,189 +60,23 @@ def markdown_answer(answer):
 
 import re
 
-class CodexGraphAgentChat(CodexGraphAgentGeneral):
+class CodexGraphAgentChat(FunctionPlanningMixin, CodexGraphAgentGeneral):
 
     def set_action_type_and_message(self):
         pass
 
+    @staticmethod
+    def _shorten_text(text, limit=160):
+        """Condense multi-line LLM输出，保留主要信息。"""
+        if text is None:
+            return ''
+        brief = str(text).strip().replace('\n', ' ')
+        while '  ' in brief:
+            brief = brief.replace('  ', ' ')
+        if len(brief) > limit:
+            brief = brief[:limit].rstrip() + '…'
+        return brief
 
-    # 1. 定义多个function schema
-    FUNCTIONS = [
-        {
-            "name": "find_nodes_in_file",
-            "description": (
-                "查找某个文件下的所有节点。"
-                "适用于用户提出如：'列出xxx.py的所有节点'、'show all nodes in xxx.py'、'查找文件xxx.py的内容'等问题。"
-                "示例：'请列出code_chat.py文件的所有节点' -> keyword='code_chat.py'"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "要查找的文件名或路径，如code_chat.py"}
-                },
-                "required": ["keyword"]
-            }
-        },
-        {
-            "name": "find_class_by_keyword",
-            "description": (
-                "查找CLASS名称中包含关键词。"
-                "适用于用户提出如：'查找包含Agent的类'、'find class with Agent'、'有哪些类名带Agent'等问题。"
-                "示例：'查找所有包含Graph的类' -> keyword='Graph'"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "类名关键词，如Agent"}
-                },
-                "required": ["keyword"]
-            }
-        },
-        {
-            "name": "find_function_by_keyword",
-            "description": (
-                "查找FUNCTION名称中包含关键词。"
-                "适用于用户提出如：'查找包含run的函数'、'find function with run'、'有哪些函数名带run'等问题。"
-                "示例：'查找所有包含call的函数' -> keyword='call'"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "函数名关键词，如run"}
-                },
-                "required": ["keyword"]
-            }
-        },
-        {
-            "name": "introduce_entity",
-            "description": (
-                "介绍、讲解、说明、解释、总结代码中的某个实体（如模块、类、函数等）。"
-                "适用于用户提出如：'请介绍xxx'、'explain xxx'、'what is xxx'、'summary xxx'、'说明xxx的作用'、'explain code_chat'、'describe xxx'、'讲讲xxx'、'xxx是什么'等问题。"
-                "请优先选择本函数用于所有与代码实体讲解、说明、解释、介绍、summary、explain、describe、what is、作用、功能等相关需求。"
-                "示例：'请介绍code_chat模块' -> keyword='code_chat'；'explain code_chat' -> keyword='code_chat'"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "要介绍的实体名，如code_chat"}
-                },
-                "required": ["keyword"]
-            }
-        },
-        {
-            "name": "find_references",
-            "description": (
-                "查找某个实体在代码库中的引用关系，适用于查找函数/类被哪些其他实体调用或引用。"
-                "示例：'查找引用 code_chat' -> keyword='code_chat'"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "要查找引用的实体名关键词，如code_chat"}
-                },
-                "required": ["keyword"]
-            }
-        },
-        {
-            "name": "find_call_hierarchy",
-            "description": (
-                "查找函数/类的调用层级（调用者和被调用者），会返回与目标节点直接相连的上游调用者和下游被调用者，适合回答类似：'谁调用了X'、'X调用了哪些函数'、'给出X的调用层级'。\n"
-                "注意：keyword 为实体名关键词，层级默认深度为1..2（可在本地 Cypher 中调整）。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "要查找调用层级的实体名关键词，如process_request"}
-                },
-                "required": ["keyword"]
-            }
-        },
-        {
-            "name": "explain_feature_implementation",
-            "description": (
-                "根据功能关键词在项目中定位实现位置：在所有节点的 description 字段里检索包含该关键词的内容，"
-                "汇总哪些模块/类/函数实现了该功能，并给出简明说明。"
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "keyword": {"type": "string", "description": "功能或能力的关键词，例如 '登录'、'鉴权'、'上传'"}
-                },
-                "required": ["keyword"]
-            }
-        },
-    ]
-
-    # 2. 本地实现每个function，返回Cypher
-    def find_nodes_in_file(self, keyword):
-        return f"MATCH (n) WHERE n.file_path CONTAINS '{keyword}' RETURN labels(n) AS node_type, n.name, n.file_path, n"
-
-    def _label_map(self):
-        """返回当前 agent 语言对应的标签映射。"""
-        lang = (getattr(self, 'language', '') or '').lower()
-        if lang.startswith('c'):
-            return {
-                'class_label': 'STRUCT',
-                'module_label': 'FILE',
-                'method_label': 'FUNCTION',
-                'field_label': 'STRUCT_MEMBER',
-                'function_label': 'FUNCTION'
-            }
-        # 默认 python 风格
-        return {
-            'class_label': 'CLASS',
-            'module_label': 'MODULE',
-            'method_label': 'FUNCTION',
-            'field_label': 'FIELD',
-            'function_label': 'FUNCTION'
-        }
-
-    def find_class_by_keyword(self, keyword):
-        labels = self._label_map()
-        class_label = labels.get('class_label', 'CLASS')
-        return f"MATCH (c:{class_label}) WHERE c.name CONTAINS '{keyword}' RETURN c.name, c.file_path, c.signature, c.code"
-
-    def find_function_by_keyword(self, keyword):
-        labels = self._label_map()
-        method_label = labels.get('method_label', 'FUNCTION')
-        return f"MATCH (f:{method_label}) WHERE f.name CONTAINS '{keyword}' RETURN f.name, f.file_path, f.signature, f.code"
-
-    def introduce_entity(self, keyword):
-        return f"MATCH (n) WHERE n.name CONTAINS '{keyword}' RETURN labels(n) AS node_type, n.name, n.file_path, n.code"
-
-    def find_references(self, keyword):
-        """查找引用关系：查找与目标实体通过常见引用/调用关系相连的节点，并返回节点与关系信息。"""
-        # 匹配 CALLS / USES / DEPENDS_ON 等关系（如果图模型使用不同关系名，需调整）
-        return (
-            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' \\n"
-            "MATCH (a)-[r]->(t) RETURN labels(a) AS from_labels, a.name AS from_name, type(r) AS rel, labels(t) AS to_labels, t.name AS to_name, t.file_path AS to_file"
-        )
-
-    def find_call_hierarchy(self, keyword):
-        """查找调用层级：返回与目标实体相关的上游调用者（callers）和下游被调用者（callees）。
-        默认只展开 1..2 层 CALLS 关系以避免结果爆炸。"""
-        # 尝试同时匹配 CALLS 和 USES 两种常见的调用/依赖关系，兼容不同图模型
-        # 注意：某些 Cypher 引擎对 [:TYPE1|TYPE2*min..max] 的语法支持可能不同，
-        # 若执行报错，可改为分别查询或使用 WHERE type(r) IN [...] 形式。
-        return (
-            f"MATCH (t) WHERE t.name CONTAINS '{keyword}' "
-            "OPTIONAL MATCH (caller)-[r1:CALLS|USES*1..2]->(t) "
-            "OPTIONAL MATCH (t)-[r2:CALLS|USES*1..2]->(callee) "
-            "RETURN DISTINCT labels(t) AS target_labels, t.name AS target_name, t.file_path AS target_file, "
-            "collect(DISTINCT {from_labels: labels(caller), from_name: caller.name, rel: type(r1)}) AS callers, "
-            "collect(DISTINCT {to_labels: labels(callee), to_name: callee.name, rel: type(r2)}) AS callees"
-        )
-
-    def explain_feature_implementation(self, keyword):
-        """根据功能关键词，查询 description 或 code 中包含该关键词的节点。"""
-        # 使用 toLower + coalesce 做鲁棒匹配，限制返回量避免输出过大
-        return (
-            f"MATCH (n) "
-            f"WHERE (exists(n.description) AND toLower(coalesce(n.description,'')) CONTAINS toLower('{keyword}')) "
-            "RETURN labels(n) AS node_type, n.name AS name, n.file_path AS file_path, n.signature AS signature, "
-            "n.description AS description, n.code AS code "
-            "LIMIT 200"
-        )
     # 3. LLM调用时传入所有function schema
     def function_call_llm(self, user_query: str):
         """
@@ -251,6 +88,7 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                 "严格从下列工具（function）中选择一个调用，不要创造新工具名。"
                 "只允许返回一个 JSON，且顶层必须且仅包含两个键：name 和 arguments。\n"
                 "本地函数中需要的参数均为keyword，所以在arguments中只包含keyword即可，防止用户输入参数时带入其他参数导致错误。\n"
+                "如果用户的提问为中文，那么提取的关键字keyword也必须为用户提到的中文关键字，不要自己解读为相近的其他词语或英文。\n"
                 f"可用工具: {[func['name'] for func in self.FUNCTIONS]}。\n"
                 "禁止输出任何解释文字或代码块标记，不允许使用 function、parameters、function_call 等其他键。\n"
                 "示例：{\"name\":\"introduce_entity\",\"arguments\":{\"keyword\":\"code_chat\"}}"
@@ -276,14 +114,21 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
         funcs = [func['name'] for func in self.FUNCTIONS]
         sys_msg = (
             "你是一个规划器。给出解决用户需求的分步计划，计划由若干步骤组成，"
-            "每步为可调用的本地函数工具。可用工具: %s。"
-            "只返回一个 JSON 对象，顶层为一个数组 (plan)，每个数组项是 {\"name\":工具名, \"arguments\":{...}, \"rationale\": \"本步的简要分析说明\"}，"
-            "工具名必须来自可用工具列表，arguments 只包含 keyword。rationale 字段为可选但建议提供，用以说明为何需要此步以及预期带来什么信息。"
+            "每步为一个步骤对象(step)，可以是纯分析（不调用任何工具）或包含一个或多个工具调用。"
+            "只有在确实需要从 Neo4j 中检索信息或调用本地工具时，才把相应的工具加入 calls。可用工具: %s。"
+            "只返回一个 JSON 对象或数组，顶层为数组 (plan)。允许的步骤形式：\n"
+            "1) 简单形式：{\"name\": 工具名, \"arguments\": {...}, \"rationale\": \"说明\"}（相当于单个 call 的步骤）；\n"
+            "2) 多调用形式：{\"step_name\": \"描述性名称\", \"calls\": [{\"name\":工具名, \"arguments\": {...}, \"rationale\": \"说明\"}, ...], \"rationale\": \"本步说明\"}\n"
+            "3) 纯分析形式：{\"step_name\": \"描述性名称\", \"analysis\": \"需要完成的思考/总结内容\", \"rationale\": \"可选说明\"}\n"
+            "无论哪种形式，都可以额外提供 \"analysis\" 字段，用于说明本步需要侧重的分析要点；该字段可帮助后续步骤理解上下文。"
+            "对于每个 call，arguments 只允许包含 keyword（或留空），rationale 为可选字符串。"
+            "本地函数中需要的参数均为keyword，所以在arguments中只包含keyword即可，防止用户输入参数时带入其他参数导致错误。\n"
+            "如果用户的提问为中文，那么提取的关键字keyword也必须为用户提到的中文关键字，不要自己解读为相近的其他词语或英文。\n"
         ) % funcs
 
         user_msg = (
             f"用户问题: {user_query}\n"
-            "请设计尽可能精简且可执行的步骤来解决该问题，只输出 JSON，不要任何额外注释。"
+            "请设计尽可能精简且可执行的步骤来解决该问题，允许存在纯分析步骤；只有在确实需要时才安排工具调用。只输出 JSON，不要任何额外注释。"
         )
 
         messages = [
@@ -313,24 +158,107 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
         else:
             return None
 
-        # 做一个简单校验并确保每步包含必要字段，填充缺省 rationale
+        # 校验并规范化每个 step 到统一结构：{step_name, calls: [{name, arguments, rationale}], rationale}
         if not isinstance(plan, list):
             return None
-        validated = []
+        validated_steps = []
         valid_names = set(funcs)
-        for step in plan:
-            if not isinstance(step, dict) or 'name' not in step:
+        for idx, step in enumerate(plan, start=1):
+            if not isinstance(step, dict):
                 return None
-            name = step.get('name')
-            if name not in valid_names:
-                # 名称非法，拒绝计划
-                return None
-            args = step.get('arguments', {}) or {}
-            # 只保留 keyword 参数，防止注入
-            args = {'keyword': args.get('keyword', '')}
-            rationale = step.get('rationale') or ''
-            validated.append({'name': name, 'arguments': args, 'rationale': rationale})
-        return validated
+
+            analysis_text = step.get('analysis') if isinstance(step.get('analysis'), str) else ''
+            if analysis_text:
+                analysis_text = analysis_text.strip()
+
+            # 简单单-call 形式
+            if 'name' in step and 'calls' not in step:
+                name = step.get('name')
+                if name not in valid_names:
+                    if analysis_text:
+                        step_name = step.get('step_name') or name or f'analysis_step_{idx}'
+                        rationale = step.get('rationale', '') or ''
+                        validated_steps.append({
+                            'step_name': step_name,
+                            'calls': [],
+                            'rationale': rationale,
+                            'analysis_instruction': analysis_text,
+                            'analysis_only': True
+                        })
+                        continue
+                    return None
+                args = step.get('arguments', {}) or {}
+                args = {'keyword': args.get('keyword', '')}
+                rationale = step.get('rationale', '') or ''
+                validated_steps.append({
+                    'step_name': name,
+                    'calls': [{'name': name, 'arguments': args, 'rationale': rationale}],
+                    'rationale': rationale,
+                    'analysis_instruction': analysis_text,
+                    'analysis_only': False
+                })
+                continue
+
+            # 多-call 形式
+            calls = step.get('calls')
+            if isinstance(calls, list):
+                validated_calls = []
+                for c in calls:
+                    if not isinstance(c, dict) or 'name' not in c:
+                        return None
+                    cname = c.get('name')
+                    if cname not in valid_names:
+                        return None
+                    carg = c.get('arguments', {}) or {}
+                    carg = {'keyword': carg.get('keyword', '')}
+                    cr = c.get('rationale', '') or ''
+                    validated_calls.append({'name': cname, 'arguments': carg, 'rationale': cr})
+                analysis_only = len(validated_calls) == 0
+                if analysis_only and not analysis_text:
+                    return None
+                validated_steps.append({
+                    'step_name': step.get('step_name') or (validated_calls[0]['name'] if validated_calls else step.get('name') or f'analysis_step_{idx}'),
+                    'calls': validated_calls,
+                    'rationale': step.get('rationale', '') or '',
+                    'analysis_instruction': analysis_text,
+                    'analysis_only': analysis_only
+                })
+                continue
+
+            if analysis_text:
+                step_name = step.get('step_name') or step.get('name') or f'analysis_step_{idx}'
+                rationale = step.get('rationale', '') or ''
+                validated_steps.append({
+                    'step_name': step_name,
+                    'calls': [],
+                    'rationale': rationale,
+                    'analysis_instruction': analysis_text,
+                    'analysis_only': True
+                })
+                continue
+
+            # 未识别的 step 形式
+            return None
+
+        # 如果提供了 initial_callinfo，优先使用其 keyword 作为规范化值，
+        # 当 planner 返回的 keyword 为初始 keyword 的子串或更短的同义词时，替换为初始 keyword，保证跨步骤一致性。
+        try:
+            if initial_callinfo and isinstance(initial_callinfo, dict):
+                init_kw = (initial_callinfo.get('arguments') or {}).get('keyword')
+                if init_kw:
+                    for step in validated_steps:
+                        for c in (step.get('calls') or []):
+                            try:
+                                ckw = (c.get('arguments') or {}).get('keyword') or ''
+                                # 若 planner 提供的 keyword 为空，或为 init_kw 的子串且更短，则用 init_kw 替换
+                                if not ckw or (ckw and len(ckw) < len(init_kw) and init_kw.find(ckw) != -1):
+                                    c['arguments']['keyword'] = init_kw
+                            except Exception:
+                                continue
+        except Exception:
+            pass
+
+        return validated_steps
 
 
     # 4. 分发到本地function，生成Cypher
@@ -344,6 +272,151 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
         if func:
             return func(**arguments)
         return ""
+
+    def execute_call(self, callinfo: dict, step_input: str = None):
+        """
+        执行单个本地函数调用并返回其结果。支持：
+        - 本地函数直接返回 Cypher 字符串 -> 自动调用 cypher_agent.run 并返回执行结果
+        - 本地函数返回任意 Python 对象 -> 直接返回
+        - 若本地函数签名接受额外的输入参数（如 'input' 或 'context'），会把 step_input 传入
+        返回字典：{'raw': 原始返回值, 'executed': cypher 执行后的结果或原始返回}
+        """
+        import inspect
+        name = callinfo.get('name')
+        args = (callinfo.get('arguments') or {}).copy()
+        func = getattr(self, name, None)
+        result = {'raw': None, 'executed': None}
+        if not func:
+            result['raw'] = None
+            result['executed'] = None
+            return result
+
+        # 如果函数接受 'input' 或 'context' 参数，则注入 step_input
+        try:
+            sig = inspect.signature(func)
+            if 'input' in sig.parameters and 'input' not in args:
+                args['input'] = step_input
+            elif 'context' in sig.parameters and 'context' not in args:
+                args['context'] = step_input
+        except Exception:
+            pass
+
+        try:
+            raw = func(**args)
+            result['raw'] = raw
+            # 如果 raw 看起来像 Cypher（粗略判断），则执行
+            if isinstance(raw, str) and (raw.strip().lower().startswith('match') or ' return ' in raw.lower()):
+                try:
+                    exec_res = self.cypher_agent.run(raw, retries=self.max_iterations_cypher)
+                    result['executed'] = exec_res
+                except Exception:
+                    result['executed'] = None
+            else:
+                result['executed'] = raw
+        except Exception as e:
+            result['raw'] = None
+            result['executed'] = None
+        return result
+
+    def record_and_suggest_followups(self, user_query, analysis, overall_summary=None, collected=None, cumulative_memory=None):
+        """
+        记录本次 LLM 的回答到工作区持久化文件，并基于本次分析生成 3-6 个可供用户后续提问的建议。
+        返回字典：{'memory_file': <path>, 'suggestions': <str>, 'entry': <dict>}
+        """
+        try:
+            import os, json, time
+        except Exception:
+            return None
+
+        workspace_root = getattr(self, 'workspace_root', None) or os.getcwd()
+        mem_path = os.path.join(workspace_root, '.agent_memory.json')
+        entry = {
+            'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S', time.localtime()),
+            'user_query': str(user_query),
+            'analysis': str(analysis),
+            'overall_summary': str(overall_summary) if overall_summary is not None else None,
+            'collected': None,
+            'cumulative_memory': str(cumulative_memory) if cumulative_memory is not None else None
+        }
+        # 尝试简化 collected 结构以便序列化
+        try:
+            if collected is not None:
+                # 保持关键信息：步骤名与每个调用的 keyword 与简短结果摘要
+                simple = []
+                for it in collected:
+                    calls = []
+                    for c in (it.get('calls') or []):
+                        calls.append({
+                            'name': c.get('call', {}).get('name'),
+                            'keyword': c.get('call', {}).get('arguments', {}).get('keyword'),
+                            'raw': (str(c.get('result', {}).get('raw'))[:1000] if c.get('result') else None),
+                            'executed': (str(c.get('result', {}).get('executed'))[:1000] if c.get('result') else None),
+                        })
+                    simple.append({
+                        'step_name': it.get('step_name'),
+                        'rationale': it.get('rationale'),
+                        'analysis_instruction': it.get('analysis_instruction'),
+                        'analysis_only': bool(it.get('analysis_only')),
+                        'calls': calls,
+                        'step_analysis': (str(it.get('step_analysis'))[:2000] if it.get('step_analysis') else None)
+                    })
+                entry['collected'] = simple
+        except Exception:
+            entry['collected'] = None
+
+        # 载入现有记忆并追加
+        try:
+            if os.path.exists(mem_path):
+                try:
+                    with open(mem_path, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                except Exception:
+                    data = []
+            else:
+                data = []
+            data.append(entry)
+            with open(mem_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            # 写盘失败则忽略，不阻塞主流程
+            pass
+
+        # 基于 analysis / overall_summary 让 LLM 生成后续问题建议（3-6 条，每行一个）
+        suggestions = ''
+        try:
+            prompt = (
+                "请基于下面的用户问题、分析与（如有）最终总结，生成 3 到 6 个用户可以接着提问的、具体且可操作的后续问题。\n"
+                "输出规范：只列出问题，每行一条，使用中文，不要额外解释。\n\n"
+                f"用户问题：{user_query}\n\n分析：\n{analysis}\n\n最终汇总：\n{overall_summary if overall_summary else ''}\n"
+            )
+            # 与其他 llm_call 用法保持一致，传入 messages 列表
+            suggestions = self.llm_call([{"role": "user", "content": prompt}])
+            # 有时候 llm_call 返回的是复杂结构，转换为字符串
+            if isinstance(suggestions, (list, dict)):
+                try:
+                    suggestions = json.dumps(suggestions, ensure_ascii=False)
+                except Exception:
+                    suggestions = str(suggestions)
+        except Exception:
+            suggestions = ''
+
+        # 将 suggestions 附加到内存条目并重写一次文件
+        try:
+            entry['suggestions'] = str(suggestions)
+            if os.path.exists(mem_path):
+                with open(mem_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            else:
+                data = []
+            # 最后一条通常为刚写入的，尝试替换它以包含 suggestions
+            if data and isinstance(data, list):
+                data[-1] = entry
+                with open(mem_path, 'w', encoding='utf-8') as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+        except Exception:
+            pass
+
+        return {'memory_file': mem_path, 'suggestions': suggestions, 'entry': entry}
 
     def question_to_cypher(self, question: str) -> str:
         """
@@ -478,44 +551,119 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
             collected = []
             # 在执行前渲染 TODO 表，展示每步及 rationale，给用户可见的分析流程
             try:
-                todo_table = "[Planned Steps]\n序号 | 工具名 | 参数(keyword) | 说明\n"
+                # 更友好的 TODO 展示：每项为序号 + 步骤名 + 简要说明 + 调用清单（name(keyword)）
+                todo_table = "[Planned Steps]\n"
                 for idx, s in enumerate(plan, start=1):
-                    todo_table += f"{idx} | {s.get('name')} | {s.get('arguments', {}).get('keyword','')} | {s.get('rationale','')}\n"
+                    step_name = s.get('step_name') or f'step_{idx}'
+                    rationale = s.get('rationale', '')
+                    calls = s.get('calls') or []
+                    analysis_instruction = s.get('analysis_instruction') or ''
+                    if calls:
+                        calls_brief = ", ".join([f"{c.get('name')}({c.get('arguments', {}).get('keyword','')})" for c in calls])
+                    else:
+                        calls_brief = "无工具调用"
+                    todo_table += f"{idx}. {step_name} — {rationale}\n    调用: {calls_brief}\n"
+                    if analysis_instruction:
+                        todo_table += f"    分析指引: {analysis_instruction}\n"
                 self.update_agent_message(todo_table)
             except Exception:
                 pass
-            for step in plan:
-                step_name = step.get('name')
-                step_args = step.get('arguments', {})
-                step_callinfo = {'name': step_name, 'arguments': step_args}
-                step_cypher = self.dispatch_function_call(step_callinfo)
-                step_result = None
-                if step_cypher:
+            # 支持多-call 的 step 执行：每步执行其 calls 列表，收集每个 call 的 raw/exec 结果，
+            # 并在每步结束后调用 LLM 生成该步的思考输出（step_thought），作为下一步的输入。
+            cumulative_memory = ''
+            step_thoughts = []
+            for step_idx, step in enumerate(plan, start=1):
+                step_name = step.get('step_name') or f'step_{step_idx}'
+                step_rationale = step.get('rationale', '')
+                calls = step.get('calls') or []
+                analysis_instruction = step.get('analysis_instruction', '') or ''
+                analysis_only = bool(step.get('analysis_only'))
+                step_calls_results = []
+                for call in calls:
+                    callinfo = {'name': call.get('name'), 'arguments': call.get('arguments', {})}
                     try:
-                        step_result = self.cypher_agent.run(
-                            step_cypher, retries=self.max_iterations_cypher)
+                        exec_res = self.execute_call(callinfo, step_input=cumulative_memory)
                     except Exception:
-                        step_result = None
-                collected.append({'step': step_callinfo, 'cypher': step_cypher, 'result': step_result})
+                        exec_res = {'raw': None, 'executed': None}
+                    step_calls_results.append({'call': callinfo, 'rationale': call.get('rationale',''), 'result': exec_res})
+                    try:
+                        # 记录每个 call 执行的 cypher 或 raw 返回，便于审计
+                        self.update_agent_message(f"[planner executed] {callinfo.get('name')} -> {str(exec_res.get('raw') or exec_res.get('executed'))[:1000]}")
+                    except Exception:
+                        pass
+
+                # 合成该步的分析（analysis），并把累积记忆（previous analyses + 本步分析）传给下一步
                 try:
-                    self.update_agent_message(f"[planner executed] {step_name} -> {step_cypher}")
+                    synth_prompt = (
+                        f"你是一个代码分析助手。下面首先给出此前步骤的已知分析/记忆（如果有），\n"
+                        f"{(cumulative_memory[:4000] + '...') if cumulative_memory else '(无)'}\n\n"
+                        f"当前步骤名称: {step_name}\n"
+                        f"步骤说明: {step_rationale if step_rationale else '(无)'}\n"
+                    )
+                    if analysis_instruction:
+                        synth_prompt += f"步骤分析指引: {analysis_instruction}\n"
+                    if step_calls_results:
+                        synth_prompt += "本步骤执行的调用及返回：\n"
+                        for idx_call, cres in enumerate(step_calls_results, start=1):
+                            synth_prompt += f"调用 {idx_call}: 名称={cres['call']['name']} 说明={cres.get('rationale','')} 返回(raw)={str(cres['result'].get('raw'))[:800]} 返回(exec)={str(cres['result'].get('executed'))[:800]}\n"
+                    else:
+                        synth_prompt += "本步骤没有执行任何工具调用，主要根据已有记忆与指引继续推理。\n"
+                    synth_prompt += (
+                        "\n请基于已有记忆和本步骤的返回：\n"
+                        "1) 给出本步骤的分析结论（1-3 句）；\n"
+                        "2) 说明本步骤的返回如何改变或补充已有记忆（如果有）；\n"
+                        "3) 输出不能包含 JSON，只返回纯文本的分析段落。"
+                    )
+                    step_analysis = self.llm_call([{"role": "user", "content": synth_prompt}])
+                except Exception:
+                    step_analysis = None
+
+                # 将本步分析追加到累积记忆中，保留可读标签，限制总长度以防 prompt 过长
+                try:
+                    if step_analysis:
+                        cumulative_memory = (cumulative_memory + "\n\n[Step %d Analysis]:\n" % step_idx + str(step_analysis)) if cumulative_memory else ("[Step %d Analysis]:\n" % step_idx + str(step_analysis))
+                        # 保持累积记忆不超过一定大小（例如 15000 字符）
+                        if len(cumulative_memory) > 15000:
+                            cumulative_memory = cumulative_memory[-15000:]
                 except Exception:
                     pass
 
+                collected.append({
+                    'step_index': step_idx,
+                    'step_name': step_name,
+                    'rationale': step_rationale,
+                    'calls': step_calls_results,
+                    'step_analysis': step_analysis,
+                    'analysis_instruction': analysis_instruction,
+                    'analysis_only': analysis_only
+                })
+                step_thoughts.append(step_analysis)
+
             # 聚合执行结果，交给 LLM 生成最终答案
-            summary = "根据规划器设计并执行的步骤，以下是每步的 Cypher 与返回结果：\n"
+            summary = "根据规划器设计并执行的步骤，以下是每步的调用与返回结果：\n"
             summary += f"用户问题: {user_query}\n\n"
-            for idx, item in enumerate(collected, start=1):
-                summary += f"步骤 {idx}: {item['step'].get('name')} 参数: {item['step'].get('arguments')}\n"
-                summary += f"Cypher: {item.get('cypher')}\n"
-                res_preview = item.get('result')
-                try:
-                    if isinstance(res_preview, list):
-                        summary += f"结果数量: {len(res_preview)}，示例: {res_preview[:3]}\n\n"
-                    else:
-                        summary += f"结果: {str(res_preview)[:1000]}\n\n"
-                except Exception:
-                    summary += "结果: (无法显示)\n\n"
+            for item in collected:
+                summary += f"步骤 {item.get('step_index')} 名称: {item.get('step_name')} 说明: {item.get('rationale')}\n"
+                analysis_instruction = item.get('analysis_instruction') or ''
+                calls = item.get('calls', [])
+                if analysis_instruction:
+                    summary += f"  分析指引: {analysis_instruction}\n"
+                if calls:
+                    for cidx, c in enumerate(calls, start=1):
+                        summary += f"  调用 {cidx}: 名称={c['call'].get('name')} 参数={c['call'].get('arguments')} 说明={c.get('rationale','')}\n"
+                        raw = c['result'].get('raw')
+                        execd = c['result'].get('executed')
+                        try:
+                            if isinstance(execd, list):
+                                summary += f"    执行结果数量: {len(execd)} 示例: {execd[:3]}\n"
+                            else:
+                                summary += f"    执行结果: {str(execd)[:1000]}\n"
+                        except Exception:
+                            summary += "    执行结果: (无法显示)\n"
+                else:
+                    summary += "  本步未调用任何工具，执行纯分析。\n"
+                # 将本步由 LLM 产生的分析结果包含到 summary 中，便于最终答案观察每步思路
+                summary += f"  本步思考（供下一步使用 & 展示）: {str(item.get('step_analysis'))[:2000]}\n\n"
 
             final_prompt = (
                 "你是代码审查助手。请基于上面每步的执行结果，回答用户的原始问题，\n"
@@ -524,16 +672,72 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
             final_prompt += summary
             analysis = self.llm_call([{"role": "user", "content": final_prompt}])
 
+            # 生成一个简洁的最终汇总（Overall Summary），便于用户快速阅读要点
+            overall_summary = None
+            try:
+                overall_prompt = (
+                    "请基于下面的每步执行摘要和分析，输出一个简洁的最终总结（中文，3-6 句），\n"
+                    "并列出 2-4 个最关键的证据项（按步骤编号引用）。\n\n"
+                )
+                overall_prompt += summary
+                # 把 LLM 的完整回答也附上，帮助生成更一致的摘要
+                overall_prompt += "\n\n当前 LLM 的详细回答为：\n" + (str(analysis) if analysis else '')
+                overall_summary = self.llm_call([{"role": "user", "content": overall_prompt}])
+            except Exception:
+                overall_summary = None
+
             # 将规划步骤作为“思考流程”附加到最终回答中，便于用户查看LLM的分析过程
             try:
-                plan_section = "\n【思考流程（Planned Steps）】\n序号 | 工具名 | 参数(keyword) | 说明\n"
-                for idx, s in enumerate(plan, start=1):
-                    plan_section += f"{idx} | {s.get('name')} | {s.get('arguments', {}).get('keyword','')} | {s.get('rationale','')}\n"
+                plan_section = "\n【思考流程（Planned Steps）】\n\n"
+                for item in collected:
+                    idx = item.get('step_index')
+                    name = item.get('step_name')
+                    rationale = item.get('rationale') or ''
+                    analysis_instruction = item.get('analysis_instruction') or ''
+                    calls = item.get('calls', [])
+                    step_analysis = item.get('step_analysis') or ''
+
+                    main_goal = rationale or analysis_instruction or name or ''
+                    main_goal = self._shorten_text(main_goal, 140)
+                    plan_section += f"Step {idx}: {name}\n"
+                    if main_goal:
+                        plan_section += f"  主要动作: {main_goal}\n"
+
+                    if calls:
+                        call_desc = []
+                        for c in calls:
+                            cname = c['call'].get('name')
+                            ckw = c['call'].get('arguments', {}).get('keyword', '')
+                            if ckw:
+                                call_desc.append(f"{cname}({ckw})")
+                            else:
+                                call_desc.append(cname)
+                        plan_section += f"  调用函数: {', '.join(call_desc)}\n"
+                    else:
+                        operation = analysis_instruction or step_analysis or '无额外说明'
+                        plan_section += f"  调用函数: 无\n  操作记录: {self._shorten_text(operation, 140)}\n"
+
+                    if calls and step_analysis:
+                        plan_section += f"  操作记录: {self._shorten_text(step_analysis, 140)}\n"
+
+                    plan_section += "\n"
             except Exception:
                 plan_section = "\n【思考流程（Planned Steps）】\n(无法生成规划步骤展示)\n"
 
-            # 把 LLM 的分析结果和思考流程合并返回
-            return f"{analysis}\n\n{plan_section}"
+            # 组合最终返回：详细回答 -> 最终汇总 -> 思考流程
+            result_parts = []
+            if analysis:
+                result_parts.append(str(analysis))
+            if overall_summary:
+                result_parts.append("\n【最终汇总（Overall Summary）】\n" + str(overall_summary))
+            result_parts.append(plan_section)
+            try:
+                mem = self.record_and_suggest_followups(user_query, analysis, overall_summary=overall_summary, collected=collected, cumulative_memory=cumulative_memory)
+                if mem and mem.get('suggestions'):
+                    result_parts.append("\n【后续可提问题建议】\n" + str(mem.get('suggestions')))
+            except Exception:
+                pass
+            return "\n\n".join(result_parts)
 
         # 如果没有规划器返回或解析失败，则使用原有单步执行流程
         if cypher_query:
@@ -603,7 +807,12 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                     summary_prompt += "未检索到显著的引用/调用节点。\n"
 
                 analysis = self.llm_call([{"role": "user", "content": summary_prompt}])
-                return analysis
+                try:
+                    mem = self.record_and_suggest_followups(user_query, analysis, overall_summary=None, collected=None, cumulative_memory=None)
+                    suggestions = mem.get('suggestions','') if mem else ''
+                except Exception:
+                    suggestions = ''
+                return f"{analysis}\n\n【后续可提问题建议】\n{suggestions}"
             elif callinfo['name'] == 'explain_feature_implementation':
                 # 收敛检索到的实现片段，优先利用 description，辅以 code 片段，生成聚合说明
                 feature = callinfo.get('arguments', {}).get('keyword', '')
@@ -636,7 +845,12 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                     "3) 依据摘录：挑选若干最能支撑判断的 description/代码片段（可精简）。\n"
                 )
                 analysis = self.llm_call([{"role": "user", "content": summary_prompt}])
-                return analysis
+                try:
+                    mem = self.record_and_suggest_followups(user_query, analysis, overall_summary=None, collected=None, cumulative_memory=None)
+                    suggestions = mem.get('suggestions','') if mem else ''
+                except Exception:
+                    suggestions = ''
+                return f"{analysis}\n\n【后续可提问题建议】\n{suggestions}"
             # find_nodes_in_file 查询，先输出节点详细信息，再用 LLM 分析
             elif callinfo['name'] == 'find_nodes_in_file':
                 node_info = "\n【节点详细信息】\n"
@@ -661,7 +875,12 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                     node_info += str(user_response)
                     summary_prompt += str(user_response)
                 analysis = self.llm_call([{"role": "user", "content": summary_prompt}])
-                return f"{node_info}\n【自动分析总结】\n{analysis}"
+                try:
+                    mem = self.record_and_suggest_followups(user_query, analysis, overall_summary=None, collected=None, cumulative_memory=None)
+                    suggestions = mem.get('suggestions','') if mem else ''
+                except Exception:
+                    suggestions = ''
+                return f"{node_info}\n【自动分析总结】\n{analysis}\n\n【后续可提问题建议】\n{suggestions}"
             # 极简：find_call_hierarchy 只输出上游调用者和下游被调用者的名称（每行一个名称）
             elif callinfo['name'] == 'find_call_hierarchy':
                 hierarchy_info = "\n【调用层级 - 名称列表】\n"
@@ -714,7 +933,12 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                 else:
                     hierarchy_info += "- 未发现下游被调用者\n"
 
-                return hierarchy_info
+                try:
+                    mem = self.record_and_suggest_followups(user_query, hierarchy_info, overall_summary=None, collected=None, cumulative_memory=None)
+                    suggestions = mem.get('suggestions','') if mem else ''
+                except Exception:
+                    suggestions = ''
+                return hierarchy_info + "\n\n【后续可提问题建议】\n" + suggestions
             else:
                 # 其它find类型，只输出节点详细信息
                 node_info = "\n【节点详细信息】\n"
@@ -729,7 +953,12 @@ class CodexGraphAgentChat(CodexGraphAgentGeneral):
                         )
                 else:
                     node_info += str(user_response)
-                return node_info
+                try:
+                    mem = self.record_and_suggest_followups(user_query, node_info, overall_summary=None, collected=None, cumulative_memory=None)
+                    suggestions = mem.get('suggestions','') if mem else ''
+                except Exception:
+                    suggestions = ''
+                return node_info + "\n\n【后续可提问题建议】\n" + suggestions
         return ""
 
     def generate(self, messages):
